@@ -88,7 +88,8 @@ class TestProtectTests:
         assert decision(edit(repo, "tests/__snapshots__/test_calc.ambr", "# snapshot", "# changed")) == "ask"
 
     def test_kit_files_and_settings_ask(self, repo):
-        assert decision(write(repo, ".claude/settings.local.json", '{"disableAllHooks": true}')) == "ask"
+        assert decision(write(repo, ".claude/settings.local.json", '{"permissions": {}}')) == "ask"
+        assert decision(write(repo, ".claude/settings.local.json", '{"disableAllHooks": true}')) == "block"
         assert decision(edit(repo, ".claude/testing-kit.json", '"enforcement": "ask"', '"enforcement": "off"')) == "ask"
 
     def test_agent_cannot_create_the_allow_marker(self, repo):

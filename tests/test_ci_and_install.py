@@ -100,10 +100,13 @@ def install(target: Path, *args: str):
 
 
 def test_reinstall_is_idempotent(repo):
+    install(repo)  # the fixture edited commands.fast; this syncs the CLAUDE.md block to it
+    assert "no:cacheprovider" in (repo / "CLAUDE.md").read_text()
     r = install(repo)
     assert r.returncode == 0
-    kinds = {line.split()[0] for line in r.stdout.splitlines() if line.startswith("  ")}
-    assert kinds <= {"same", "keep", "update"}, r.stdout     # CLAUDE.md block is rewritten in place
+    kinds = {line.split()[0] for line in r.stdout.splitlines()
+             if line.startswith("  ") and not line.strip()[0].isdigit()}
+    assert kinds <= {"same", "keep"}, r.stdout
     assert (repo / "CLAUDE.md").read_text().count("testing-kit:start") == 1
     settings = json.loads((repo / ".claude/settings.json").read_text())
     commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]

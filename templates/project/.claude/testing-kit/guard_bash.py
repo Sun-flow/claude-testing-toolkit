@@ -17,6 +17,7 @@ import shlex
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
@@ -55,10 +56,12 @@ def split_commands(command: str) -> list[list[str]]:
     return out
 
 
-def protected(token: str, root: Path, cfg: dict) -> str | None:
+def protected(token: str, root: Path, cfg: dict, cwd: Path | None = None) -> str | None:
     tok = token.strip("'\"")
     if not tok or tok.startswith("-") or "=" in tok and not tok.startswith(("./", "/")):
         return None
+    if cwd is not None and not Path(tok).is_absolute():
+        tok = str(cwd / tok)  # after a `cd`, relative paths are relative to the new directory
     rel = kitlib.rel_posix(tok, root)
     if rel.startswith("../"):
         return None
@@ -74,7 +77,12 @@ def protected(token: str, root: Path, cfg: dict) -> str | None:
 
 def violations(command: str, root: Path, cfg: dict) -> list[str]:
     found = []
+    cwd = root
     for tokens in split_commands(command):
+        if tokens[0] in {"cd", "pushd", "Set-Location", "sl", "chdir"}:
+            dest = tokens[1] if len(tokens) > 1 else str(root)
+            cwd = Path(dest) if Path(dest).is_absolute() else cwd / dest
+            continue
         # strip leading env assignments and wrappers
         while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
             tokens = tokens[1:]
@@ -86,7 +94,7 @@ def violations(command: str, root: Path, cfg: dict) -> list[str]:
         if cmd.endswith(".exe"):
             cmd = cmd[:-4]
         args = tokens[1:]
-        targets = [r for r in (protected(a, root, cfg) for a in args) if r]
+        targets = [r for r in (protected(a, root, cfg, cwd) for a in args) if r]
         if cmd in WRITE_CMDS and targets:
             found.append(f"`{cmd}` on {', '.join(targets)}")
         elif cmd in {"sed", "perl", "ruby"} and any(INPLACE_FLAGS.match(a) for a in args) and targets:
@@ -100,7 +108,7 @@ def violations(command: str, root: Path, cfg: dict) -> list[str]:
                 found.append(f"inline `{cmd}` writing {', '.join(targets)}")
             else:
                 # catch paths quoted inside the code string
-                inner = [r for r in (protected(t, root, cfg) for t in re.findall(r"['\"]([^'\"]+)['\"]", code)) if r]
+                inner = [r for r in (protected(t, root, cfg, cwd) for t in re.findall(r"['\"]([^'\"]+)['\"]", code)) if r]
                 if inner and INLINE_WRITE.search(code):
                     found.append(f"inline `{cmd}` writing {', '.join(inner)}")
     for m in REDIRECT.finditer(command):
@@ -124,6 +132,8 @@ def main() -> None:
                  command) or "disableAllHooks" in command:
         kitlib.block("Blocked: starting Claude with different settings, or disabling hooks, from inside a "
                      "session would bypass the project's test protections.")
+    if ".claude/testing-kit/.state" in command.replace("\\", "/") or "testing-kit/.state" in command:
+        kitlib.block("Blocked: .claude/testing-kit/.state holds the audit of protected files; leave it alone.")
     if "allow-test-edits" in command:
         kitlib.block("Blocked: only the user may create or change the test-edit allow marker.")
 
@@ -131,7 +141,8 @@ def main() -> None:
     if bad:
         kitlib.guard("this command would change protected tests or test harness (" + "; ".join(bad)
                      + "). Existing tests are the specification (TG-14/TG-15). Approve only if the user "
-                     "asked for it. Claude: if a test is wrong, stop and report it with your evidence.", cfg)
+                     "asked for it. Claude: if a test is wrong, stop and report it with your evidence; to "
+                     "add tests, write a new test (file) instead.", cfg)
 
     reasons = []
     if SNAPSHOT_UPDATE.search(command):
@@ -148,4 +159,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    kitlib.run_hook(main, protective=True)

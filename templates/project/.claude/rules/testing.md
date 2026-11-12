@@ -4,7 +4,8 @@ Always loaded. The long form, with reasons and sources, is `docs/testing/GUIDELI
 
 **Before tests**
 - List the assumptions in the task (inputs, data shape, errors, environment) and check them. If the spec has two reasonable readings, ask; don't pick one (TG-01, TG-02).
-- Declare the risk tier (low / medium / high, default in `.claude/testing-kit.json`) and meet its oracle rule (guidelines §1).
+- Declare the risk tier (default in `.claude/testing-kit.json`) and meet its oracle rule (guidelines §1):
+  low = tests from the spec, written before the code; medium = also tests written from the spec in a separate context (`spec-test-writer`) and a fresh-context review; high = also a non-LLM oracle (human-approved acceptance test, reference implementation, schema or reviewed properties) and a diff mutation score of 70% or more.
 
 **Writing tests**
 - Red before green: write the test, run it, show it failing for the expected reason, then change the code (TG-04).
@@ -20,4 +21,4 @@ Always loaded. The long form, with reasons and sources, is `docs/testing/GUIDELI
 - If you're stuck after a few honest attempts, stop and write a report starting with `BLOCKED:` (TG-19). That is always an acceptable outcome; gaming the tests never is.
 
 **Reporting**
-- Show evidence: the exact command, the number of tests collected, the result. Say what you did NOT run (other tiers, skipped tests, configurations) and anything odd (TG-13, TG-49). `python .claude/testing-kit/test_report.py` summarises the last run.
+- Show evidence: the exact command, the number of tests collected, the result. Say what you did NOT run (other tiers, skipped tests, configurations) and anything odd (TG-13, TG-49). `{{PY}} .claude/testing-kit/test_report.py` summarises the last run.

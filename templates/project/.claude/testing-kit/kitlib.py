@@ -21,8 +21,10 @@ DEFAULT_CONFIG = {
         "**/__snapshots__/**", "**/*.snap", "**/snapshots/**", "**/testdata/**",
     ],
     "harness_globs": [
-        "**/conftest.py", "pytest.ini", "tox.ini", "noxfile.py", ".coveragerc",
-        "jest.config.*", "vitest.config.*", "vitest.workspace.*", "playwright.config.*",
+        "**/conftest.py", "pytest.ini", "pytest.toml", ".pytest.ini", ".pytest.toml", "tox.ini",
+        "noxfile.py", ".coveragerc", "jest.config.*", "jest.setup.*", "vitest.config.*",
+        "vitest.workspace.*", "vitest.setup.*", "vite.config.*", "playwright.config.*",
+        "babel.config.*", ".babelrc*", "**/setupTests.*",
         "karma.conf.*", ".mocharc*", "codecov.yml", ".codecov.yml",
         ".github/workflows/**", ".github/CODEOWNERS", "CODEOWNERS",
         ".claude/settings.json", ".claude/settings.local.json", ".claude/testing-kit/**",
@@ -67,9 +69,16 @@ def _load_config(root: str) -> dict:
     if path.is_file():
         try:
             user = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            user = {}
+            if not isinstance(user, dict):
+                raise ValueError("not a JSON object")
+        except (OSError, ValueError) as exc:
+            # fail closed: a broken config must not quietly turn strict mode into ask mode
+            cfg["enforcement"] = "deny"
+            cfg["_config_error"] = f".claude/testing-kit.json can't be read ({exc}); fix it"
+            return cfg
         for key, value in user.items():
+            if value is None:
+                continue
             if isinstance(value, dict) and isinstance(cfg.get(key), dict):
                 cfg[key].update(value)
             else:
@@ -110,7 +119,8 @@ def rel_posix(path: str | os.PathLike, root: Path) -> str:
     if not p.is_absolute():
         p = root / p
     try:
-        rel = os.path.relpath(os.path.normpath(str(p)), os.path.normpath(str(root)))
+        # realpath, so a symlink pointing into the project can't hide a protected file
+        rel = os.path.relpath(os.path.realpath(str(p)), os.path.realpath(str(root)))
     except ValueError:  # different drive on Windows
         return Path(path).as_posix()
     return Path(rel).as_posix()
@@ -158,9 +168,10 @@ def head_content(root: Path, rel: str) -> str | None:
 def read_hook_input() -> dict:
     try:
         data = sys.stdin.read()
-        return json.loads(data) if data.strip() else {}
+        obj = json.loads(data) if data.strip() else {}
     except ValueError:
         return {}
+    return obj if isinstance(obj, dict) else {}
 
 
 def block(message: str) -> None:
@@ -169,15 +180,45 @@ def block(message: str) -> None:
     sys.exit(2)
 
 
+DENY_NEXT_STEP = ("Blocked (strict mode): Claude may not make this change. If it is wrong, stop and tell the "
+                  "user the file, what it expects, what the code does and your evidence. The user can make "
+                  "the change themselves, or run `touch .claude/allow-test-edits` to allow test edits for 2 hours.")
+
+
 def guard(message: str, cfg: dict) -> None:
     """Refuse a protected change: ask the user (default) or deny outright."""
+    note = f" Also: {cfg['_config_error']}." if cfg.get("_config_error") else ""
     if cfg.get("enforcement", "ask") == "deny":
-        block(message)
+        # the ask-mode text addresses an approver; in deny mode there is none
+        message = message.split(" Approve only if")[0]
+        block("Testing kit: " + message.rstrip(". ") + ". " + DENY_NEXT_STEP + note)
+    message += note
     emit({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "ask",
         "permissionDecisionReason": "Testing kit: " + message,
     }})
+
+
+def run_hook(main, *args, protective: bool = True) -> None:
+    """Run a hook's main(). A crash in a protective PreToolUse hook asks the user instead of silently
+    allowing the action (Claude Code treats a crashed hook as non-blocking); other hooks just report it."""
+    try:
+        main(*args)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        where = Path(sys.argv[0]).name
+        if protective:
+            emit({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": f"Testing kit: the {where} check failed ({type(exc).__name__}: {exc}), "
+                                            "so it can't confirm this action is safe for the tests. Approve only "
+                                            "if you know it doesn't weaken tests or test config.",
+            }})
+        sys.stderr.write(f"Testing kit: {where} failed: {type(exc).__name__}: {exc}\n")
+        sys.exit(0)
 
 
 def emit(obj: dict) -> None:
@@ -193,7 +234,8 @@ TEST_FUNC_RE = re.compile(
 )
 
 SKIP_RE = re.compile(
-    r"@pytest\.mark\.(?:skip|skipif|xfail)|pytest\.skip\(|pytest\.xfail\(|@unittest\.skip|"
+    r"pytest\.mark\.(?:skip|skipif|xfail)\b|pytest\.skip\(|pytest\.xfail\(|pytest\.importorskip\(|"
+    r"@unittest\.skip|\bpytestmark\s*=.*\b(?:skip|xfail)|"
     r"\b(?:it|test|describe)\.(?:skip|only|todo|fails)\b|\bx(?:it|describe|test)\(|\bf(?:it|describe)\(|"
     r"\bt\.Skip(?:Now|f)?\(|@Disabled\b|@Ignore\b|#\[ignore\]",
 )
@@ -206,6 +248,13 @@ RETRY_RE = re.compile(
     r"\.retries\(\s*[1-9]|@Retry\b|@RepeatedTest\b",
 )
 BROAD_EXCEPT_RE = re.compile(r"except\s*(?:Exception|BaseException)?\s*:\s*(?:\n\s*)?(?:pass|\.\.\.|return)\b")
+# Production code that behaves differently under a test (TG-16). A cheap heuristic: string tricks
+# beat it, so review (test-reviewer agent, a human) is the real gate.
+TEST_ENV_RE = re.compile(
+    r"PYTEST_CURRENT_TEST|PYTEST_|['\"]pytest['\"]\s+in\s+sys\.modules|sys\.modules\.get\(\s*['\"]pytest|"
+    r"\b_pytest\b|NODE_ENV\s*[!=]==?\s*['\"]test['\"]|JEST_WORKER_ID|process\.env\.VITEST\b|"
+    r"import\.meta\.env\.(?:VITEST|MODE\s*===?\s*['\"]test)|['\"]test['\"]\s+in\s+sys\.argv|testing\.Testing\(\)|"
+    r"\bunittest\b.*\bin\s+sys\.modules")
 NO_COVER_RE = re.compile(r"pragma:\s*no\s*cover|istanbul\s+ignore|c8\s+ignore|v8\s+ignore")
 
 
@@ -214,3 +263,29 @@ def test_names(text: str) -> list[str]:
     for m in TEST_FUNC_RE.finditer(text or ""):
         names.append(next(g for g in m.groups() if g))
     return names
+
+
+_CLASS_RE = re.compile(r"^(\s*)class\s+(\w+)")
+_DEF_RE = re.compile(r"^(\s*)(?:async\s+)?def\s+(test_\w+)")
+
+
+def qualified_test_names(text: str) -> list[str]:
+    """Test names qualified by their Python class (TestAdd::test_zero), as a list so duplicates count.
+    Non-Python tests fall back to bare names."""
+    out, classes = [], []  # classes: stack of (indent, name)
+    py = False
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        while classes and indent <= classes[-1][0]:
+            classes.pop()
+        c = _CLASS_RE.match(line)
+        if c:
+            classes.append((len(c.group(1)), c.group(2)))
+            continue
+        d = _DEF_RE.match(line)
+        if d:
+            py = True
+            out.append("::".join([n for _, n in classes] + [d.group(2)]))
+    return out if py else test_names(text)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
@@ -24,4 +25,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    kitlib.run_hook(main, protective=False)

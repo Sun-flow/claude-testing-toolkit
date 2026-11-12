@@ -22,10 +22,12 @@ Guidelines: TG-14, TG-15, TG-17 in docs/testing/GUIDELINES.md.
 from __future__ import annotations
 
 import json
+from collections import Counter
 import re
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
@@ -67,7 +69,7 @@ def is_pure_addition(old: str, new: str) -> bool:
     new_lines = iter(new.splitlines())
     for line in (l for l in old.splitlines() if l.strip()):
         for candidate in new_lines:
-            if candidate == line:
+            if candidate == line or widened_import(line, candidate):
                 break
         else:
             return False
@@ -96,12 +98,47 @@ def addition_problems(old: str, new: str) -> list[str]:
         problems.append("it adds a skip/xfail/only/todo marker")
     if kitlib.NO_COVER_RE.search(added):
         problems.append("it adds a coverage-exclusion pragma")
-    old_names = kitlib.test_names(old)
-    new_names = kitlib.test_names(new)
-    shadowed = sorted({n for n in old_names if new_names.count(n) > old_names.count(n)})
+    old_names = kitlib.qualified_test_names(old)
+    new_names = kitlib.qualified_test_names(new)
+    old_c, new_c = Counter(old_names), Counter(new_names)
+    shadowed = sorted(n for n in old_c if new_c[n] > old_c[n])
     if shadowed:
         problems.append("it defines existing test name(s) again, which would shadow them: " + ", ".join(shadowed))
+    rebound = sorted(imported_names(old) & set(MODULE_ASSIGN.findall(added)))
+    if rebound:
+        problems.append("it reassigns imported name(s) at module level, which replaces the code under test: "
+                        + ", ".join(rebound))
     return problems
+
+
+MODULE_ASSIGN = re.compile(r"^(\w+)\s*(?::[^=]*)?=(?!=)", re.M)
+_FROM_IMPORT = re.compile(r"^from\s+\S+\s+import\s+\(?([^)\n]+)", re.M)
+_IMPORT = re.compile(r"^import\s+([\w., ]+)", re.M)
+
+
+def imported_names(text: str) -> set[str]:
+    names = set()
+    for m in _FROM_IMPORT.finditer(text):
+        for part in m.group(1).split(","):
+            bits = part.strip().split()
+            if bits:
+                names.add(bits[-1])  # `x as y` binds y
+    for m in _IMPORT.finditer(text):
+        for part in m.group(1).split(","):
+            bits = part.strip().split()
+            if bits:
+                names.add(bits[-1].split(".")[0])
+    return names
+
+
+def widened_import(old_line: str, new_line: str) -> bool:
+    """`from m import a, b` -> `from m import a, b, c`: adding names to an import is an addition."""
+    o, n = _FROM_IMPORT.match(old_line), _FROM_IMPORT.match(new_line)
+    if not (o and n) or old_line.split(" import ")[0] != new_line.split(" import ")[0]:
+        return False
+    olds = [x.strip() for x in o.group(1).split(",") if x.strip()]
+    news = [x.strip() for x in n.group(1).split(",") if x.strip()]
+    return set(olds) <= set(news)
 
 
 def _ini_sections(text: str, patterns: list[str]) -> str:
@@ -137,6 +174,10 @@ def main() -> None:
     if not target:
         return
     root = kitlib.project_dir(hi)
+    text = json.dumps(ti)
+    if "disableAllHooks" in text and str(target).replace("\\", "/").endswith(("settings.json", "settings.local.json")):
+        kitlib.block("Blocked: turning hooks off (disableAllHooks) would switch off the test protections. "
+                     "Ask the user to change their settings themselves.")
     if kitlib.allow_marker_present(root):
         return
     rel = kitlib.rel_posix(target, root)
@@ -197,4 +238,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    kitlib.run_hook(main, protective=True)

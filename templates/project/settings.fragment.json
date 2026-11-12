@@ -1,4 +1,5 @@
 {
+  "disableAllHooks": false,
   "hooks": {
     "PreToolUse": [
       {
@@ -29,7 +30,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit|Write|NotebookEdit",
         "hooks": [
           {
             "type": "command",
