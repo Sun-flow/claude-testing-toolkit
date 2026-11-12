@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Edit|Write|NotebookEdit", "hooks": [
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/protect_tests.py\"", "timeout": 20}
+      ]},
+      {"matcher": "Bash|PowerShell", "hooks": [
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/guard_bash.py\"", "timeout": 20},
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/bash_audit.py\" pre", "timeout": 30}
+      ]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Edit|Write", "hooks": [
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/guard_test_edits.py\"", "timeout": 20}
+      ]},
+      {"matcher": "Bash|PowerShell", "hooks": [
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/bash_audit.py\" post", "timeout": 30}
+      ]}
+    ],
+    "Stop": [
+      {"hooks": [
+        {"type": "command", "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/tests_on_stop.py\"", "timeout": 600}
+      ]}
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)", "Read(./.env.*)",
+      "Write(./.claude/allow-test-edits)", "Edit(./.claude/allow-test-edits)",
+      "Edit(./.claude/settings.local.json)", "Write(./.claude/settings.local.json)"
+    ]
+  }
+}

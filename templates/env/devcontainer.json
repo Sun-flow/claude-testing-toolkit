@@ -1,0 +1,10 @@
+{
+  "name": "testing-kit",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {"version": "22"}
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "pip install uv && (test -f uv.lock && uv sync --locked || true) && (test -f package-lock.json && npm ci || true)",
+  "mounts": []
+}

@@ -1,0 +1,72 @@
+# Testing kit CI for Python (uv). Pin every action to a full commit SHA in real use
+# (keep the tag as a comment); tags are shown here for readability.
+name: tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: astral-sh/setup-uv@v7
+        with: {enable-cache: true}
+      - run: uv sync --locked
+      - name: Fast tier
+        run: {{FAST}}
+      - name: Test report
+        if: ${{ !cancelled() }}
+        run: python .claude/testing-kit/test_report.py .reports/junit.xml || true
+      - name: Diff coverage (changed lines)
+        if: github.event_name == 'pull_request'
+        env: {BASE_REF: "${{ github.base_ref }}"}
+        run: uv run --with diff-cover diff-cover coverage.xml --compare-branch="origin/$BASE_REF" --fail-under=90
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with: {name: junit, path: .reports/}
+
+  test-guard:
+    # Did this branch delete, skip, loosen or regenerate tests, or change test config?
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - env:
+          BASE_REF: ${{ github.base_ref }}
+          ALLOW_TEST_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'allow-test-changes') && '1' || '0' }}
+        run: python .claude/testing-kit/test_diff_guard.py --base "origin/$BASE_REF"
+
+  base-tests:
+    # The base branch's tests (and harness) must still pass against this branch's code.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: astral-sh/setup-uv@v7
+        with: {enable-cache: true}
+      - env: {BASE_REF: "${{ github.base_ref }}"}
+        run: python .claude/testing-kit/base_tests.py --base "origin/$BASE_REF"
+
+  all-green:
+    # Make THIS the one required status check in the branch ruleset.
+    if: always()
+    needs: [test, test-guard, base-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: test-guard, base-tests
