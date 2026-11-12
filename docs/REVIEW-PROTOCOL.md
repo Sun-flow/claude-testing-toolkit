@@ -1,6 +1,6 @@
 # Multi-Agent Review Protocol
 
-> **Version** 0.1 · **Date** 2026-11-12
+> **Version** 0.2 · **Date** 2026-11-12
 > Used to review this kit's documents and tooling, and packaged as the `/test-review` skill for reviewing test suites in any repo.
 
 ## Where this comes from
@@ -70,4 +70,4 @@ Rules:
 ## Running it with Claude Code
 
 - **In this project:** the coordinator spawns one subagent per lens with the artifact paths, the lens description and the findings format, and **no summary of the author's conclusions**.
-- **In a repo with the kit installed:** `/test-review [base-branch]` spawns the `test-reviewer` agent once per lens over the diff (lenses 2, 4 and 5 for test changes), then consolidates into `reviews/` or the PR description. In CI: `anthropics/claude-code-action` with `prompt: "/test-review"`.
+- **In a repo with the kit installed:** `/test-review [base-branch]` spawns the `test-reviewer` agent once per lens over the diff, passing the lens in the prompt (adversarial → checklist A+B; spec fidelity → C expected values, failure paths, requirements; quality → C naming, determinism, mocks, smells; mutation → D, high tier only). It consolidates into the PR description by default, or `reviews/` if the repo keeps one. In CI: `anthropics/claude-code-action` with `prompt: "/test-review"`. Not available in claude.ai project threads, where repo skills and agents don't load; there, the coordinator runs the lenses as subagents, as in this project.
