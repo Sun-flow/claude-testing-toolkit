@@ -1,0 +1,23 @@
+# Scheduled: re-run the fast tier many times with random order to find intermittent
+# failures (often real race conditions) instead of retrying them away in the PR gate.
+name: flake-finder
+on:
+  schedule: [{cron: "17 3 * * 1"}]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  repeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: {round: [1, 2, 3, 4, 5]}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - name: Repeat run (seed is printed by pytest-randomly)
+        run: uv run --with pytest-repeat pytest -p randomly --count=5 -x -q --junitxml=.reports/junit-${{ matrix.round }}.xml
+      - if: ${{ !cancelled() }}
+        run: python .claude/testing-kit/test_report.py .reports/junit-${{ matrix.round }}.xml || true

@@ -1,0 +1,13 @@
+{
+  "commands": {
+    "setup": "{{SETUP}}",
+    "fast": "{{FAST}}",
+    "full": "{{FULL}}",
+    "mutation": ""
+  },
+  "junit_path": ".reports/junit.xml",
+  "src_dirs": {{SRC_DIRS}},
+  "default_tier": "{{TIER}}",
+  "enforcement": "ask",
+  "stop_hook": {"enabled": true, "timeout_s": 300}
+}
