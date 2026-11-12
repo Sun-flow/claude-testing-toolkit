@@ -158,3 +158,12 @@ def test_check_reports_ok_after_install(repo):
     r = subprocess.run([sys.executable, str(KIT / "install.py"), "--check", str(repo)], capture_output=True, text=True,
                        env={**os.environ, "TESTING_KIT_PYTHON": "python3"})
     assert r.returncode == 0, r.stdout
+
+
+def test_diff_guard_blocks_coverage_pragmas_in_production_code(repo):
+    branch(repo)
+    src = repo / "src/calc/__init__.py"
+    src.write_text(src.read_text() + "\n\ndef untested():  # pragma: no cover\n    return 1\n")
+    git(repo, "commit", "-qam", "hide from coverage")
+    r = py(repo, "test_diff_guard.py", "--base", "main")
+    assert r.returncode == 1 and "coverage-exclusion pragma" in r.stdout

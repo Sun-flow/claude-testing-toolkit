@@ -22,12 +22,8 @@ if [ -n "$lockfiles" ] && ! sha256sum --check --status "$stamp" 2>/dev/null; the
   fi
 fi
 
-# 2. Plugins the repo expects (cloud sessions don't have your local plugins).
-if command -v claude >/dev/null 2>&1 && [ -f .claude/settings.json ]; then
-  for p in $("$py" -c "import json;print(' '.join(k for k,v in json.load(open('.claude/settings.json')).get('enabledPlugins',{}).items() if v))" 2>/dev/null); do
-    claude plugin install "$p" --scope project >/dev/null 2>&1 || echo "Testing kit: could not install plugin $p"
-  done
-fi
+# 2. Plugins: not installed here. A plugin installed from a hook only loads in the NEXT
+#    session; enable plugins on your claude.ai account / project settings instead.
 
 # 3. Tell Claude how to test (stdout becomes session context).
 fast=$("$py" -c "import json;print(json.load(open('$cfg'))['commands'].get('fast',''))" 2>/dev/null)

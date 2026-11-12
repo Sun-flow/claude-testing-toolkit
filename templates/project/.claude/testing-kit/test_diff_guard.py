@@ -84,6 +84,8 @@ def analyse(root: Path, base: str) -> dict:
                 added, _ = diff_lines(root, merge_base, new_path)
                 if any(TEST_ENV_RE.search(a) for a in added):
                     block.append(f"production code checks for a test environment: {new_path} (TG-16)")
+                if any(kitlib.NO_COVER_RE.search(a) for a in added):
+                    block.append(f"coverage-exclusion pragma added in {new_path} (TG-33)")
             continue
         if kitlib.matches_any(new_path, ["**/__snapshots__/**", "**/*.snap", "**/snapshots/**", "**/*.approved.*",
                                          "**/*.golden", "**/golden/**"]) and code[0] in "MD":
