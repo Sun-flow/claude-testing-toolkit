@@ -2,12 +2,13 @@
 """PreToolUse hook for the spec-test-writer agent only (wired in its frontmatter).
 
 Keeps the agent away from the implementation so its tests come from the spec,
-not from the code (the "AI echo chamber", guidelines TG-05, risk tiers):
-  * Read/Edit/Write/NotebookEdit under a source directory -> denied
-  * Grep/Glob under a source directory, or with no path (which would search the
-    whole project, source included) -> denied
-  * Bash: only the configured test commands, plus read-only git/ls on non-source
-    paths; anything mentioning a source directory -> denied
+not from the code (the "AI echo chamber", guidelines TG-05, risk tiers). It is
+an ALLOWLIST, so it works for flat repos too (bot.py at the root):
+  * Read/Grep/Glob only inside `spec_readable` (docs, specs, README, existing
+    tests, type stubs); Grep/Glob need an explicit path
+  * Edit/Write only on test paths
+  * Bash: only the configured test commands, plus ls/pwd/git status|log
+Reduces, doesn't eliminate, leakage.
 Known leaks no hook can close: what the parent agent writes in its delegation
 prompt, stack traces in test output, and interface stubs the tests must import.
 """
@@ -22,6 +23,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
 SAFE_BASH = re.compile(r"^(?:ls|pwd|git\s+(?:status|log|diff\s+--stat|ls-files))\b")
+
+
+DEFAULT_READABLE = ["docs/**", "doc/**", "specs/**", "spec/**", "README*", "*.md", "**/*.pyi", "**/*.d.ts",
+                    "openapi.*", "**/openapi.*", "**/schema*.json", ".claude/testing-kit.json"]
+
+
+def readable(value: str, root: Path, cfg: dict) -> bool:
+    rel = kitlib.rel_posix(value, root).rstrip("/")
+    if rel in ("", "."):
+        return False
+    globs = cfg.get("spec_readable") or DEFAULT_READABLE
+    return kitlib.matches_any(rel, globs) or kitlib.is_test_path(rel, cfg) or \
+        kitlib.matches_any(rel + "/x", globs) or kitlib.is_test_path(rel + "/x", cfg)
 
 
 def under_src(value: str, root: Path, src_dirs: list[str]) -> bool:
@@ -39,18 +53,20 @@ def main() -> None:
     reason = ("You are the spec-only test writer: derive expected behaviour from the ticket, spec, docs and "
               "public interface, never from the implementation. ")
 
-    if tool in {"Read", "Edit", "Write", "NotebookEdit"}:
+    if tool == "Read":
+        target = ti.get("file_path") or ""
+        if target and not readable(target, root, cfg):
+            kitlib.block(reason + f"{target} is not spec material (allowed: docs, specs, README, tests, "
+                         "type stubs, schemas; set spec_readable in .claude/testing-kit.json).")
+    elif tool in {"Edit", "Write", "NotebookEdit"}:
         target = ti.get("file_path") or ti.get("notebook_path") or ""
-        if target and under_src(target, root, src):
-            kitlib.block(reason + f"{target} is implementation code.")
+        if target and not kitlib.is_test_path(kitlib.rel_posix(target, root), cfg):
+            kitlib.block(reason + f"You may only write test files; {target} is not one.")
     elif tool in {"Grep", "Glob"}:
         path = ti.get("path") or ""
-        if not path:
-            kitlib.block(reason + "Give Grep/Glob an explicit path outside the source directories "
-                         f"({', '.join(src)}), e.g. tests/ or docs/.")
-        if under_src(path, root, src):
-            kitlib.block(reason + f"{path} is implementation code.")
-    elif tool == "Bash":
+        if not path or not readable(path, root, cfg):
+            kitlib.block(reason + "Give Grep/Glob an explicit path inside docs/, specs/ or the tests.")
+    elif tool in {"Bash", "PowerShell"}:
         command = ti.get("command", "")
         allowed = [c for c in (cfg.get("commands") or {}).values() if c]
         try:
@@ -59,7 +75,10 @@ def main() -> None:
             tokens = command.split()
         if any(under_src(t, root, src) for t in tokens if not t.startswith("-")):
             kitlib.block(reason + "That command touches implementation code.")
-        if not (SAFE_BASH.match(command.strip()) or any(command.strip().startswith(c.split(" -")[0]) for c in allowed)):
+        if re.search(r"[;&|`$<>]", command.replace("2>&1", "")) and not any(command.strip().startswith(c) for c in allowed):
+            kitlib.block(reason + "Run one test command at a time, without pipes or redirects.")
+        cmd = command.strip()
+        if not (SAFE_BASH.match(cmd) or any(cmd == c or cmd.startswith(c + " ") for c in allowed)):
             kitlib.block(reason + "Only the project's test commands and read-only git/ls are allowed here: "
                          + "; ".join(allowed or ["(none configured in .claude/testing-kit.json)"]))
 

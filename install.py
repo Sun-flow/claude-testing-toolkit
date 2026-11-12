@@ -52,7 +52,7 @@ PROFILE_FILES = {
         ".claude/testing-kit/kitlib.py", ".claude/testing-kit/protect_tests.py",
         ".claude/testing-kit/guard_bash.py", ".claude/testing-kit/bash_audit.py",
         ".claude/testing-kit/test_report.py", ".claude/testing-kit/test_diff_guard.py",
-        ".claude/testing-kit/base_tests.py", ".claude/rules/testing.md",
+        ".claude/testing-kit/base_tests.py", ".claude/testing-kit/config_guard.py", ".claude/rules/testing.md",
     ],
 }
 PROFILE_FILES["standard"] = PROFILE_FILES["minimal"] + [
@@ -63,7 +63,7 @@ PROFILE_FILES["standard"] = PROFILE_FILES["minimal"] + [
     ".claude/skills/mutation-check/SKILL.md", ".claude/skills/test-review/SKILL.md",
 ]
 PROFILE_FILES["strict"] = PROFILE_FILES["standard"]
-MINIMAL_HOOK_SCRIPTS = {"protect_tests.py", "guard_bash.py", "bash_audit.py"}
+MINIMAL_HOOK_SCRIPTS = {"protect_tests.py", "guard_bash.py", "bash_audit.py", "config_guard.py"}
 
 
 class Plan:

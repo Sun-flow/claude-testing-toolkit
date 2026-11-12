@@ -248,3 +248,22 @@ def test_spec_writer_can_read_tests_and_docs_and_run_tests(repo):
     assert decision(writer(repo, "Grep", {"pattern": "add", "path": "tests"})) == "allow"
     fast = json.loads((repo / ".claude/testing-kit.json").read_text())["commands"]["fast"]
     assert decision(writer(repo, "Bash", {"command": fast})) == "allow"
+
+
+def test_spec_writer_allowlist_works_for_flat_repos_and_blocks_code_execution(repo):
+    (repo / "bot.py").write_text("print('hi')\n")
+    (repo / "README.md").write_text("# calc\nadd(a, b) returns the sum.\n")
+    assert decision(writer(repo, "Read", {"file_path": str(repo / "bot.py")})) == "block"
+    assert decision(writer(repo, "Read", {"file_path": str(repo / "README.md")})) == "allow"
+    assert decision(writer(repo, "Write", {"file_path": str(repo / "src/calc/new.py"), "content": ""})) == "block"
+    assert decision(writer(repo, "Write", {"file_path": str(repo / "tests/test_spec.py"), "content": ""})) == "allow"
+    fast = json.loads((repo / ".claude/testing-kit.json").read_text())["commands"]["fast"]
+    interpreter = fast.split(" -m ")[0]
+    assert decision(writer(repo, "Bash", {"command": f"{interpreter} -c \"import calc, inspect; print(inspect.getsource(calc))\""})) == "block"
+    assert decision(writer(repo, "Bash", {"command": f"{fast} tests/test_spec.py"})) == "allow"
+
+
+def test_config_guard_blocks_settings_changes_mid_session(repo):
+    code, _, err = run_hook(repo, "config_guard.py", {"hook_event_name": "ConfigChange", "source": "local_settings"})
+    assert code == 2
+    assert run_hook(repo, "config_guard.py", {"hook_event_name": "ConfigChange", "source": "user_settings"})[0] == 0
