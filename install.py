@@ -8,7 +8,7 @@
 
 Safe to re-run: identical files are skipped; a file you changed is left alone and the
 kit's version is written beside it as <name>.kit-new (unless --force); settings.json
-is merged (only the kit's own hook entries are added or refreshed); CLAUDE.md gets a
+is merged (only the kit's own hook entries are added, refreshed or removed); CLAUDE.md gets a
 block between `testing-kit` markers. It never writes through a symlink, so a skill
 linked in from claude-toolkit is never overwritten.
 """
@@ -116,11 +116,12 @@ class Plan:
 
 def detect(root: Path) -> dict:
     d = {"stack": "unknown", "setup": "", "fast": "", "full": "", "one": "(see your runner's docs)",
-         "src_dirs": [], "ci": None}
+         "src_dirs": [], "ci": None, "pm": "", "warnings": []}
     pkg = root / "package.json"
     if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists() or (root / "setup.py").exists():
         d["stack"], d["ci"] = "python", "tests-python.yml"
         uv = (root / "uv.lock").exists()
+        d["pm"] = "uv" if uv else "pip"
         run = "uv run " if uv else "python -m "
         d["setup"] = "uv sync --locked" if uv else ("pip install -r requirements.txt"
                                                     if (root / "requirements.txt").exists() else "pip install -e .")
@@ -137,14 +138,23 @@ def detect(root: Path) -> dict:
         except ValueError:
             data = {}
         deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
-        d["setup"] = "npm ci" if (root / "package-lock.json").exists() else "npm install"
+        if (root / "pnpm-lock.yaml").exists():
+            d["pm"], d["setup"], x = "pnpm", "pnpm install --frozen-lockfile", "pnpm exec "
+        elif (root / "yarn.lock").exists():
+            d["pm"], d["setup"], x = "yarn", "yarn install --frozen-lockfile", "yarn "
+        else:
+            d["pm"], x = "npm", "npx "
+            d["setup"] = "npm ci" if (root / "package-lock.json").exists() else "npm install"
         if "vitest" in deps:
-            d["fast"] = "npx vitest run --reporter=default --reporter=junit --outputFile.junit=.reports/junit.xml"
-            d["one"] = "`npx vitest run path/to/file.test.ts -t \"name\"`"
+            d["fast"] = f"{x}vitest run --reporter=default --reporter=junit --outputFile.junit=.reports/junit.xml"
+            d["one"] = f"`{x}vitest run path/to/file.test.ts -t \"name\"`"
         elif "jest" in deps:
-            d["fast"] = ("JEST_JUNIT_OUTPUT_FILE=.reports/junit.xml npx jest --ci "
+            d["fast"] = (f"JEST_JUNIT_OUTPUT_FILE=.reports/junit.xml {x}jest --ci "
                          "--reporters=default --reporters=jest-junit")
-            d["one"] = "`npx jest path/to/file.test.js -t \"name\"`"
+            d["one"] = f"`{x}jest path/to/file.test.js -t \"name\"`"
+            if "jest-junit" not in deps:
+                d["warnings"].append("jest-junit is not a devDependency: add it (the fast command, Stop hook "
+                                     "and CI gates read its JUnit report)")
         elif data.get("scripts", {}).get("test"):
             d["fast"] = "npm test"
             d["one"] = "`npm test -- <pattern>`"
@@ -181,6 +191,11 @@ def merge_settings(existing: dict, fragment: dict, keep_scripts: set[str] | None
                 current.append(g)
         if current:
             hooks[event] = current
+        else:
+            hooks.pop(event, None)  # e.g. Stop after switching to the minimal profile
+    for key, value in fragment.items():
+        if key not in ("hooks", "permissions"):
+            out[key] = value
     perms = out.setdefault("permissions", {})
     for key, values in fragment.get("permissions", {}).items():
         merged = list(perms.get(key, []))
@@ -209,6 +224,38 @@ def ensure_lines(path: Path, lines: list[str]) -> str:
     return text + "# testing kit\n" + "\n".join(missing) + "\n"
 
 
+def ci_values(det: dict) -> dict:
+    """YAML steps for installing dependencies, matched to the detected package manager."""
+    pad = "      "
+    if det["stack"] == "python":
+        if det["pm"] == "uv":
+            steps = ["- uses: astral-sh/setup-uv@v7", "  with: {enable-cache: true}", "- run: uv sync --locked"]
+            flake = "uv run --with pytest-repeat --with pytest-randomly pytest"
+        else:
+            steps = ["- uses: actions/setup-python@v6", "  with: {python-version: '3.12', cache: pip}",
+                     f"- run: python -m pip install pytest && {det['setup']}"]
+            flake = "python -m pip install pytest-repeat pytest-randomly && python -m pytest"
+        return {"CI_SETUP": ("\n" + pad).join(steps), "FLAKE_RUN": flake}
+    if det["stack"] == "node":
+        cache = det["pm"] if det["pm"] in ("npm", "pnpm", "yarn") else "npm"
+        steps = ["- run: corepack enable"] if cache in ("pnpm", "yarn") else []
+        steps += ["- uses: actions/setup-node@v5",
+                  "  with: {node-version: lts/*, cache: " + cache + "}", f"- run: {det['setup']}"]
+        return {"CI_SETUP": ("\n" + pad).join(steps), "FLAKE_RUN": ""}
+    return {"CI_SETUP": "", "FLAKE_RUN": ""}
+
+
+REVIEW_ORIGIN = re.compile(r"## Where this comes from\n.*?(?=\n## )", re.S)
+
+
+def neutral(text: str) -> str:
+    """Docs copied into other repos: drop the kit author's own sources and names."""
+    text = REVIEW_ORIGIN.sub("## Where this comes from\n\nAdapted from earlier review practice: expected results "
+                             "come from the brief, not the code; findings go in a table; fixes are numbered "
+                             "proposals that the maintainer approves; reviewers never auto-apply them.\n", text)
+    return re.sub(r"\bmae\b", "the maintainer", text)
+
+
 def docs_dir() -> Path | None:
     for cand in (KIT / "docs", KIT.parent / "docs"):
         if (cand / "TESTING-GUIDELINES.md").exists():
@@ -224,7 +271,16 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
     tier = a.tier or ("medium" if a.profile == "strict" else "low")
     values = {"PY": PY, "FAST": det["fast"] or "(set commands.fast in .claude/testing-kit.json)",
               "FULL": det["full"] or "(not set)", "SETUP": det["setup"], "ONE": det["one"], "TIER": tier,
-              "SRC_DIRS": json.dumps(det["src_dirs"] or ["src"]), "OWNER": a.owner or "OWNER"}
+              "SRC_DIRS": json.dumps(det["src_dirs"] or ["src"]), "OWNER": a.owner or "OWNER",
+              **ci_values(det)}
+    cfg_path = root / ".claude" / "testing-kit.json"
+    try:  # the CLAUDE.md block follows the user's edited config, not fresh detection
+        existing_cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+    except ValueError:
+        existing_cfg = {}
+    cmds = existing_cfg.get("commands") or {}
+    block_values = {**values, "FAST": cmds.get("fast") or values["FAST"], "FULL": cmds.get("full") or values["FULL"],
+                    "TIER": existing_cfg.get("default_tier") or tier}
 
     for rel in PROFILE_FILES[a.profile]:
         src = T / "project" / rel
@@ -237,7 +293,6 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
         cfg["enforcement"] = "deny"
     if a.profile == "minimal":
         cfg["stop_hook"]["enabled"] = False
-    cfg_path = root / ".claude" / "testing-kit.json"
     if cfg_path.exists() and not a.force:
         plan.note("keep", cfg_path, "existing config kept")
     else:
@@ -265,37 +320,51 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
     else:
         plan.note("same", settings_path)
 
-    block = fill((T / "project" / "CLAUDE-block.md").read_text(encoding="utf-8"), values)
+    block = fill((T / "project" / "CLAUDE-block.md").read_text(encoding="utf-8"), block_values)
     claude_md = root / "CLAUDE.md"
-    plan.note("update" if claude_md.exists() else "create", claude_md, "## Testing block")
-    if not a.dry_run:
-        claude_md.write_text(update_claude_md(claude_md, block), encoding="utf-8", newline="\n")
+    old_md = claude_md.read_text(encoding="utf-8") if claude_md.exists() else None
+    new_md = update_claude_md(claude_md, block)
+    if old_md == new_md:
+        plan.note("same", claude_md)
+    else:
+        plan.note("update" if old_md is not None else "create", claude_md, "## Testing block")
+        if not a.dry_run:
+            claude_md.write_text(new_md, encoding="utf-8", newline="\n")
 
     docs = docs_dir()
     if docs:
-        plan.write(root / "docs/testing/GUIDELINES.md", (docs / "TESTING-GUIDELINES.md").read_text(encoding="utf-8"), root)
-        plan.write(root / "docs/testing/REVIEW-PROTOCOL.md", (docs / "REVIEW-PROTOCOL.md").read_text(encoding="utf-8"), root)
+        plan.write(root / "docs/testing/GUIDELINES.md", neutral((docs / "TESTING-GUIDELINES.md").read_text(encoding="utf-8")), root)
+        plan.write(root / "docs/testing/REVIEW-PROTOCOL.md", neutral((docs / "REVIEW-PROTOCOL.md").read_text(encoding="utf-8")), root)
     else:
         plan.note("MISSING", "docs/testing/GUIDELINES.md", "kit docs not found next to the installer")
 
     gi = root / ".gitignore"
-    new_gi = ensure_lines(gi, [".claude/testing-kit/.state/", ".claude/allow-test-edits", ".reports/",
+    new_gi = ensure_lines(gi, [".claude/testing-kit/.state/", ".claude/testing-kit/__pycache__/",
+                               ".claude/allow-test-edits", ".reports/",
                                ".claude/settings.local.json"])
     if (gi.read_text(encoding="utf-8") if gi.exists() else "") != new_gi:
         plan.note("update" if gi.exists() else "create", gi, "kit ignores")
         if not a.dry_run:
             gi.write_text(new_gi, encoding="utf-8", newline="\n")
 
+    plan.workflow = False
     if a.ci:
-        if det["ci"]:
+        if det["ci"] and det["fast"]:
             text = fill((T / "ci" / det["ci"]).read_text(encoding="utf-8"), values)
             plan.write(root / ".github/workflows/tests.yml", text, root)
-            plan.write(root / ".github/workflows/flake-finder.yml",
-                       (T / "ci" / "flake-finder.yml").read_text(encoding="utf-8"), root)
+            plan.workflow = True
+            if det["stack"] == "python":
+                plan.write(root / ".github/workflows/flake-finder.yml",
+                           fill((T / "ci" / "flake-finder.yml").read_text(encoding="utf-8"), values), root)
         else:
-            plan.note("SKIP", ".github/workflows/tests.yml", f"no CI template for stack '{det['stack']}'")
-        if a.profile == "strict":
+            why = f"no CI template for stack '{det['stack']}'" if not det["ci"] else "no test command detected"
+            plan.note("SKIP", ".github/workflows/tests.yml", why)
+        if a.owner:
             plan.write(root / ".github/CODEOWNERS", fill((T / "ci" / "CODEOWNERS").read_text(encoding="utf-8"), values), root)
+        else:
+            plan.note("SKIP", ".github/CODEOWNERS", "pass --owner @you-or-team to protect the test harness")
+    elif a.owner:
+        plan.note("SKIP", ".github/CODEOWNERS", "--owner is used with --ci")
 
     plan.detected = det
     return plan
@@ -321,6 +390,24 @@ def install_user(home: Path, a: argparse.Namespace) -> Plan:
     else:
         plan.note("same", sp)
     return plan
+
+
+def fast_command_problems(fast: str, root: Path) -> list[str]:
+    """Can the fast command start? (Checks the program and, for `python -m X`, the module; doesn't run tests.)"""
+    import shlex
+    try:
+        words = [w for w in shlex.split(fast) if "=" not in w]
+    except ValueError:
+        return []
+    if not words:
+        return []
+    if not shutil.which(words[0]):
+        return [f"`{words[0]}` (from commands.fast) is not on PATH"]
+    if Path(words[0]).name.lower().startswith(("python", "py")) and len(words) > 2 and words[1] == "-m":
+        r = subprocess.run([words[0], "-c", f"import {words[2]}"], cwd=root, capture_output=True, text=True)
+        if r.returncode != 0:
+            return [f"`{words[0]} -m {words[2]}` can't run here: {words[2]} is not installed"]
+    return []
 
 
 def check(root: Path) -> int:
@@ -349,8 +436,11 @@ def check(root: Path) -> int:
             problems.append(f"protect_tests.py failed on a probe: {r.stderr.strip()[:200]}")
     try:
         cfg = json.loads((root / ".claude/testing-kit.json").read_text(encoding="utf-8"))
-        if not cfg.get("commands", {}).get("fast"):
+        fast = cfg.get("commands", {}).get("fast", "")
+        if not fast:
             problems.append("commands.fast is empty in .claude/testing-kit.json (Stop hook and CI gates need it)")
+        else:
+            problems += fast_command_problems(fast, root)
     except (OSError, ValueError):
         problems.append("missing or invalid .claude/testing-kit.json")
     if problems:
@@ -393,12 +483,19 @@ def main(argv: list[str] | None = None) -> int:
     conflicts = [p for k, p, _ in plan.log if k == "CONFLICT"]
     if conflicts:
         print("\nReview each .kit-new file and merge it by hand, or re-run with --force.")
-    print("\nNext: check the commands in .claude/testing-kit.json, run "
-          f"`{PY} {Path(__file__).name} --check {root}`, restart Claude Code (hooks load at start), "
-          "and commit the files.")
-    if a.ci:
-        print("For CI to bind: make the `all-green` job a required check in the branch ruleset"
-              + (" and require Code Owner review." if a.profile == "strict" else "."))
+    for w in det.get("warnings", []):
+        print(f"\nWARNING: {w}")
+    me = f'"{Path(__file__).resolve()}"' if " " in str(Path(__file__).resolve()) else Path(__file__).name
+    target = f'"{root}"' if " " in str(root) else str(root)
+    print("\nNext steps:")
+    print("  1. Check the commands in .claude/testing-kit.json, then run "
+          f"`{PY} {me} --check {target}`.")
+    print("  2. Restart Claude Code (hooks load at start).")
+    print("  3. Commit the files. CI flags this first commit as a harness change: add the "
+          "`allow-test-changes` label to that PR.")
+    if getattr(plan, "workflow", False):
+        print("  4. On GitHub: create the `allow-test-changes` label; in the branch ruleset make `all-green` a "
+              "required check, block force pushes" + (", and require Code Owner review." if a.owner else "."))
     return 0
 
 

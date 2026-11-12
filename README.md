@@ -12,7 +12,7 @@ hooks (PreToolUse, PostToolUse, Stop, ConfigChange).
 # into an existing or fresh repo
 python install.py --project /path/to/repo                 # standard profile
 python install.py --project /path/to/repo --profile minimal
-python install.py --project /path/to/repo --profile strict --ci --env --owner @your-team
+python install.py --project /path/to/repo --profile strict --ci --owner @your-team --env
 python install.py --project /path/to/repo --dry-run       # show the plan, write nothing
 
 # your own habits, for every repo (~/.claude)
@@ -37,8 +37,21 @@ and keeps one marked block in `CLAUDE.md`.
 | standard | Minimal + test-quality feedback after edits, run fast tests on Stop, the spec-only test writer and test reviewer agents, skills `/write-tests`, `/run-tests`, `/mutation-check`, `/test-review` |
 | strict | Standard + `enforcement: deny` (no "ask" prompts, blocked outright) and default risk tier medium |
 
-`--ci` adds GitHub workflows (tests, test-diff guard, base-branch tests, flake finder) and CODEOWNERS.
-`--env` adds a cloud setup script, a SessionStart script and a devcontainer.
+`--ci` adds a GitHub workflow matched to the detected stack and package manager (tests, test-diff guard,
+base-branch tests, and a weekly flake finder for Python). With `--owner`, it also writes CODEOWNERS for the
+test harness. `--env` adds a SessionStart script for cloud sessions.
+
+## After installing
+
+1. Check the commands in `.claude/testing-kit.json` (the installer guessed them), then run
+   `python install.py --check /path/to/repo`. It checks the hooks run and the fast command can start.
+2. Restart Claude Code. Hooks load when a session starts.
+3. Commit. CI treats the commit that adds the kit as a harness change, so that first PR needs the
+   `allow-test-changes` label.
+4. On GitHub (with `--ci`):
+   - create a label named `allow-test-changes`. Only people who can approve test changes should add it;
+   - in the branch ruleset, make `all-green` a required check, block force pushes, and (with `--owner`)
+     require Code Owner review.
 
 ## What loads where
 
@@ -46,7 +59,7 @@ and keeps one marked block in `CLAUDE.md`.
 |---|---|---|
 | Claude Code CLI / desktop / IDE in the repo | yes | yes |
 | Claude Code on the web with the repo checked out | yes | yes |
-| `claude -p` in CI | yes | yes, unless `--bare` (which skips hooks) |
+| `claude -p` in CI | yes | project hooks and skills yes, unless `--bare`; subagent frontmatter hooks no (so the spec-test-writer's allowlist doesn't apply) |
 | A claude.ai chat or project thread that only reads files | no | no |
 
 When the hooks don't run, the CI checks are what holds. See `docs/RULES-BY-LEVEL.md`.
@@ -64,8 +77,14 @@ When the hooks don't run, the CI checks are what holds. See `docs/RULES-BY-LEVEL
    review for `.claude/`, `.github/` and test config, and block force pushes. Steps are in
    `docs/RULES-BY-LEVEL.md`. Without this, a PR can edit the workflow that checks it.
 
-A human overrides a block with `ALLOW_TEST_CHANGES=1` in CI (e.g. from a PR label), or by approving the
-"ask" prompt locally.
+Overrides, all made by a person:
+- Locally, approve the "ask" prompt. In the strict profile there is no prompt; run
+  `touch .claude/allow-test-edits` to allow test edits for 2 hours (Claude is blocked from creating it).
+- In CI, add the `allow-test-changes` label to the PR. The gates re-run, still list what changed, and pass.
+
+What the checks can't do: the check for production code that detects tests (TG-16) is a pattern match that
+string tricks beat, so the `test-reviewer` agent and human review are the real gate there. Hooks are speed
+bumps; base-branch tests in CI plus branch protection are what bind.
 
 ## Docs
 
@@ -82,4 +101,4 @@ python -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/python -m pytest -q tests
 ```
 
-Not yet tested on Windows or macOS.
+Not yet tested on Windows or macOS, or live in GitHub Actions. Review rounds and their findings are in `../reviews/`.

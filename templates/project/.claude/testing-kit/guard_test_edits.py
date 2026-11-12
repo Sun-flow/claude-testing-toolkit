@@ -17,14 +17,12 @@ import re
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 from protect_tests import added_text  # noqa: E402
 
-TEST_ENV_RE = re.compile(
-    r"PYTEST_CURRENT_TEST|['\"]pytest['\"]\s+in\s+sys\.modules|NODE_ENV\s*[!=]==?\s*['\"]test['\"]|"
-    r"JEST_WORKER_ID|process\.env\.VITEST\b|import\.meta\.env\.(?:VITEST|MODE\s*===?\s*['\"]test)|"
-    r"['\"]test['\"]\s+in\s+sys\.argv|testing\.Testing\(\)")
+TEST_ENV_RE = kitlib.TEST_ENV_RE
 ASSERT_HINTS = ("assert", "raises", "expect", "check", "verify", "should", "fail")
 
 
@@ -109,4 +107,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    kitlib.run_hook(main, protective=False)

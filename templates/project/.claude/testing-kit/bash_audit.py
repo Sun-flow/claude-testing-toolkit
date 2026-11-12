@@ -19,6 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
@@ -68,7 +69,10 @@ def main(mode: str) -> None:
     try:
         before = json.loads(sf.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return
+        kitlib.block("Testing kit: the audit snapshot taken before that shell command is missing or damaged "
+                     f"({sf.relative_to(root) if sf.is_relative_to(root) else sf}), so changes to protected tests "
+                     "can't be checked. Don't touch .claude/testing-kit/. Tell the user and run `git status` "
+                     "to show what changed.")
     after = {f: digest(root / f) for f in before}
     changed = sorted(f for f in before if before[f] != after[f])
     if changed:
@@ -80,4 +84,5 @@ def main(mode: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "post")
+    mode = sys.argv[1] if len(sys.argv) > 1 else "post"
+    kitlib.run_hook(main, mode, protective=(mode == "pre"))

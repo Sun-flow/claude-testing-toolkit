@@ -15,9 +15,8 @@ jobs:
       matrix: {round: [1, 2, 3, 4, 5]}
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v7
-      - run: uv sync --locked
+      {{CI_SETUP}}
       - name: Repeat run (seed is printed by pytest-randomly)
-        run: uv run --with pytest-repeat pytest -p randomly --count=5 -x -q --junitxml=.reports/junit-${{ matrix.round }}.xml
+        run: {{FLAKE_RUN}} -p randomly --count=5 -x -q --junitxml=.reports/junit-${{ matrix.round }}.xml
       - if: ${{ !cancelled() }}
         run: python .claude/testing-kit/test_report.py .reports/junit-${{ matrix.round }}.xml || true

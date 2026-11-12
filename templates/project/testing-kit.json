@@ -9,6 +9,7 @@
   "src_dirs": {{SRC_DIRS}},
   "default_tier": "{{TIER}}",
   "high_paths": [],
+  "spec_readable": ["docs/**", "specs/**", "spec/**", "README*", "*.md", "**/*.pyi", "**/*.d.ts", "openapi.*", "**/schema*.json"],
   "enforcement": "ask",
   "stop_hook": {"enabled": true, "timeout_s": 300}
 }

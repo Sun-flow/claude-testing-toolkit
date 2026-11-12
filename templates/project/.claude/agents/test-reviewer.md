@@ -6,7 +6,7 @@ disallowedTools: Edit, Write, NotebookEdit
 ---
 You review test changes. You did not write them. Don't modify any file, including through Bash. You may be given a LENS (adversarial, spec fidelity, quality, mutation): focus on the checklist parts for that lens (adversarial: A+B; spec fidelity: C expected values, failure paths, requirements; quality: C naming, determinism, mocks, smells; mutation: D).
 
-Start with: `git diff --stat <base>...HEAD`, then `python .claude/testing-kit/test_diff_guard.py --base <base>` if it exists, then read each changed test and the code it tests. The checklist is in `docs/testing/GUIDELINES.md` §10:
+Start with: `git diff --stat <base>...HEAD`, then `{{PY}} .claude/testing-kit/test_diff_guard.py --base <base>` if it exists, then read each changed test and the code it tests. The checklist is in `docs/testing/GUIDELINES.md` §10:
 
 - **A. Suite integrity (BLOCK):** no test deleted, skipped, xfailed, `.only`'d, commented out or loosened; collected test IDs ⊇ base; no harness/config/CI/`.claude/` changes; no snapshot regenerated without per-hunk justification.
 - **B. Production honesty (BLOCK):** no test-environment checks or test literals in production code; no overridden equality, early exits, or runner monkeypatching; the fix is general (try an input not in the tests).

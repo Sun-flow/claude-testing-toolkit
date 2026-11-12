@@ -1,8 +1,10 @@
-# Testing kit CI for Node (npm). Pin every action to a full commit SHA in real use
+# Testing kit CI for Node. Pin every action to a full commit SHA in real use
 # (keep the tag as a comment); tags are shown here for readability.
 name: tests
 on:
   pull_request:
+    # labeled/unlabeled: adding `allow-test-changes` re-runs the gates
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 permissions:
@@ -18,16 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
-      - uses: actions/setup-node@v5
-        with: {node-version-file: .nvmrc, cache: npm}
-      - run: npm ci
+      {{CI_SETUP}}
       - name: Fast tier
         run: {{FAST}}
       - name: Test report
         if: ${{ !cancelled() }}
         run: python .claude/testing-kit/test_report.py .reports/junit.xml || true
       - name: Diff coverage (changed lines; needs coverage/cobertura-coverage.xml)
-        if: github.event_name == 'pull_request'
+        # Runs only when the fast tier writes a coverage report (e.g. add --cov --cov-report=xml,
+        # or vitest/jest --coverage with the cobertura reporter).
+        if: github.event_name == 'pull_request' && hashFiles('coverage.xml', 'coverage/cobertura-coverage.xml') != ''
         env: {BASE_REF: "${{ github.base_ref }}"}
         run: pipx run diff-cover coverage/cobertura-coverage.xml --compare-branch="origin/$BASE_REF" --fail-under=90
       - uses: actions/upload-artifact@v4
@@ -55,8 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
-      - uses: actions/setup-node@v5
-        with: {node-version-file: .nvmrc, cache: npm}
+      {{CI_SETUP}}
       - env: {BASE_REF: "${{ github.base_ref }}"}
         run: python .claude/testing-kit/base_tests.py --base "origin/$BASE_REF"
 

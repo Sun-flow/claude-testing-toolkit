@@ -13,6 +13,6 @@ Follow these steps for: $ARGUMENTS
    - Pick the technique from guidelines §5 (property, table-driven, differential, snapshot...). Cover failure and boundary paths.
 4. **Red.** Run the new tests with the fast command; show them failing for the expected reason. A test that passes before the change proves nothing: fix the test's premise, not by weakening it.
 5. **Implement** the general fix. Never special-case test inputs.
-6. **Green.** Run the narrowest tests, then the fast suite. Show the command, count collected and result; `python .claude/testing-kit/test_report.py` gives the four-part summary.
+6. **Green.** Run the narrowest tests, then the fast suite. Show the command, count collected and result; `{{PY}} .claude/testing-kit/test_report.py` gives the four-part summary.
 7. **High tier:** add the independent oracle (human-approved acceptance test, reference implementation, schema check, or reviewed properties) and run `/mutation-check`.
 8. **Report** what you did not run and anything odd. If you got stuck, stop with `BLOCKED:` and the evidence.
