@@ -8,6 +8,7 @@
   "junit_path": ".reports/junit.xml",
   "src_dirs": {{SRC_DIRS}},
   "default_tier": "{{TIER}}",
+  "high_paths": [],
   "enforcement": "ask",
   "stop_hook": {"enabled": true, "timeout_s": 300}
 }

@@ -1,6 +1,6 @@
 # Claude Packages for Testing: Install, Activate, Call
 
-> **Version** 0.1 (draft for review) · **Date** 2026-11-12 · Evidence: [R6] (`research/06-claude-packages.md`, including its follow-up section).
+> **Version** 0.2 (after review round 1) · **Date** 2026-11-12 · Evidence: [R6] (`research/06-claude-packages.md`, including its follow-up section).
 > Install commands were checked against each package's source on 2026-11-12. Items marked **[unverified]** were not. Pin a minimum Claude Code version in the kit README: several features below (`onFailure`, `/goal`, the `if:` hook field) are recent.
 
 ## How the pieces fit
@@ -12,33 +12,57 @@
 | Skills (= slash commands) | Instructions + optional tool limits, `/name` | `~/.claude/skills/`, `.claude/skills/`, plugins | `/name`, or automatically by description |
 | Subagents | Separate context, own tools/model/hooks | `~/.claude/agents/`, `.claude/agents/` | Automatically by description, `@agent-name`, or `claude --agent name` |
 | Plugins | Bundles of the above + MCP | Marketplaces | `/plugin install name@marketplace`, or `enabledPlugins` in settings |
-| MCP servers | External tools (browser, tickets, mutation) | `claude mcp add`, `.mcp.json` | Tools appear as `mcp__server__tool` |
+| MCP servers | External tools (browser, tickets, mutation) | `claude mcp add`, `.mcp.json` | Tools appear as `mcp__<server>__<tool>`, or `mcp__plugin_<plugin>_<server>__<tool>` when a plugin bundles the server |
 
 **First-time setup on any machine:** `claude plugin marketplace add anthropics/claude-plugins-official` (added automatically in the first interactive session, needed explicitly in CI and fresh containers).
 
 ---
 
+## When to use what (testing)
+
+| Task | Low tier | Medium / high tier |
+|---|---|---|
+| Write tests for a change | `superpowers:test-driven-development` (your current route) or `/write-tests` | `/write-tests`, which delegates the tests to the `spec-test-writer` agent |
+| Run tests and report | `/run-tests` | `/run-tests` |
+| Check the tests can fail | — | `/mutation-check` |
+| Review test changes | `@agent-test-reviewer` | `/test-review` (multi-agent) |
+| Keep going until green | `/goal all tests pass` (stops on a `BLOCKED:` report) | Ralph Loop with `--max-iterations`, and a completion promise that requires test output |
+| Library docs | Context7 | Context7 |
+
+Use one route per task. The kit's hooks apply whichever route you pick.
+
+## By repo type
+
+| Repo | Install | Add |
+|---|---|---|
+| Static website | kit `minimal` | Playwright CLI + skills (Tier 3) for a smoke and accessibility pass |
+| Game | kit `minimal` | Hypothesis `/hypothesis` for property tests of the logic core |
+| Python bot / automation | kit `standard` | `pyright-lsp`; mutmut-mcp if you want mutation runs as tools |
+| Library or service other code depends on | kit `strict --ci` | `pr-review-toolkit`; Schemathesis if it has an OpenAPI schema |
+| LLM / agent code | kit `standard --ci` | Tier 5 eval libraries; promptfoo red-team on a schedule |
+
 ## Tier 1: recommended for every repo
 
 | Package | What it gives testing | Install | Call it |
 |---|---|---|---|
-| **This kit** (`testing-kit`) | Integrity hooks, spec-only test writer, reviewer, `/write-tests`, `/run-tests`, `/mutation-check`, `/test-review` | `python kit/install.py --project .` (files must live in the repo; see `kit/README.md`) | Hooks fire automatically; skills by `/name` |
-| **superpowers** | TDD red-green-refactor skill (deletes code written before tests), systematic debugging, verification-before-completion, code review | `/plugin install superpowers@claude-plugins-official` | Auto-triggers; or `/superpowers:test-driven-development` |
-| **pr-review-toolkit** | `pr-test-analyzer` agent (behavioural coverage, critical gaps), `silent-failure-hunter`, code reviewer | `/plugin install pr-review-toolkit@claude-plugins-official` | Ask: "Review test coverage for this PR" |
-| **context7** | Current docs for test libraries (pytest fixtures, Vitest APIs), fewer hallucinated APIs | `/plugin install context7@claude-plugins-official` | Automatic; tools `resolve-library-id`, `query-docs` |
-| **Language-server plugin** (`pyright-lsp`, `typescript-lsp`, `gopls-lsp`, `rust-analyzer-lsp`, …) | Type errors right after an edit, before tests run | `/plugin install pyright-lsp@claude-plugins-official` (needs the server binary installed) | Automatic |
+| **This kit** (`testing-kit`) | Integrity hooks, CI gates, spec-only test writer, reviewer, `/write-tests`, `/run-tests`, `/mutation-check`, `/test-review` | `python kit/install.py --project .` (see `kit/README.md`; hooks and agents must be repo files, so it isn't a plugin) | Hooks fire automatically; skills by `/name` |
+| **Language-server plugin** (`pyright-lsp`, `typescript-lsp`, `gopls-lsp`, `rust-analyzer-lsp`, …) | Type errors right after an edit, before tests run | `/plugin install pyright-lsp@claude-plugins-official` (needs the server binary installed **[prerequisites unverified per plugin]**) | Automatic |
+
+You already use **Superpowers** (TDD, systematic debugging, verification-before-completion), **Ralph Loop** and **Context7**; keep them. They are advice and loops; the kit's hooks and CI are the enforcement.
 
 ## Tier 2: by situation
 
 | Package | Use when | Install | Call it |
 |---|---|---|---|
+| **pr-review-toolkit** | A second opinion on test coverage (`pr-test-analyzer`) and silent failures | `/plugin install pr-review-toolkit@claude-plugins-official` | Ask: "Review test coverage for this PR" |
 | **ralph-loop** | Long autonomous "until green" work with a verifiable finish line | `/plugin install ralph-loop@claude-plugins-official` | `/ralph-loop "<task>" --completion-promise "DONE" --max-iterations 10` (always set the cap); `/cancel-ralph` |
 | **`/goal`** (built-in) | Lighter "keep going until tests pass" for one session | none | `/goal all tests pass and lint is clean`; `/goal clear` |
-| **code-review** | Multi-agent review in CI or locally | `/plugin install code-review@claude-plugins-official` | `/code-review [--comment]` |
+| **`/code-review`** (built-in) | General multi-agent code review | none (the `code-review` plugin's own command is `/code-review:code-review`) | `/code-review` |
 | **hookify** | Writing simple block/warn rules without code | `/plugin install hookify@claude-plugins-official` | `/hookify <behaviour>`, `/hookify:list` |
 | **security-guidance** | Security warnings on edit and review on commit | `/plugin install security-guidance@claude-plugins-official` | Automatic hooks |
-| **Hypothesis `/hypothesis` command** | Agent-written property-based tests, from the Hypothesis team | See the Hypothesis repo's Claude Code command instructions **[install path unverified]** | `/hypothesis` |
-| **mutmut-mcp** (community) | Python mutation testing via tools: run, list survivors, rank | `claude mcp add mutmut -- uvx --from git+https://github.com/wdm0006/mutmut-mcp mutmut-mcp` | MCP tools; the kit's `/mutation-check` works without it |
+| **Hypothesis `/hypothesis` command** | Agent-written property-based tests, from the Hypothesis team | Copy the command file from the Hypothesis repo into `.claude/commands/` (or `~/.claude/commands/`) | `/hypothesis` |
+| **TDD Guard / Probity** (community) | Hook-enforced test-first: blocks implementation without a failing test | See its README **[install line not re-verified]**. Overlaps the kit's hooks: pick one for test-first enforcement | Automatic hooks |
+| **mutmut-mcp** (community) | Python mutation testing as tools: run, list survivors, rank | `claude mcp add mutmut -- uvx --from git+https://github.com/wdm0006/mutmut-mcp mutmut-mcp` **[derived from its README]** | MCP tools; `/mutation-check` works without it |
 
 ## Tier 3: web and UI testing
 
@@ -46,7 +70,7 @@
 |---|---|---|---|
 | **Playwright CLI + skills** | Browser automation inside coding sessions (Microsoft's recommendation over MCP: fewer tokens) | `npm i -g @playwright/cli@latest && playwright-cli install --skills` | Skill auto-loads; `playwright-cli …` |
 | **Playwright Test Agents** | Planner → plan in `specs/`, generator → `tests/*.spec.ts`, healer → repairs failing tests | `npx playwright init-agents --loop=claude` (Playwright ≥ 1.56). **Warning:** writes `.claude/agents/*.md` and **overwrites `.mcp.json`**; back it up first | Subagents by name |
-| **playwright** (MCP plugin) | Exploratory, stateful browser sessions | `/plugin install playwright@claude-plugins-official` | `mcp__playwright__browser_*` |
+| **playwright** (MCP plugin) | Exploratory, stateful browser sessions | `/plugin install playwright@claude-plugins-official` | `mcp__plugin_playwright_playwright__browser_*` |
 | **chrome-devtools-mcp** | Console/network inspection, performance traces, accessibility | `/plugin install chrome-devtools-mcp@claude-plugins-official` | MCP tools + skills |
 | **webapp-testing** skill | Python Playwright scripts with a server lifecycle helper | `/plugin marketplace add anthropics/skills` → `/plugin install example-skills@anthropic-agent-skills` | Automatic by description |
 
@@ -62,14 +86,14 @@ Use these with the `spec-test-writer` agent so tests come from the ticket, not t
 | Linear | `/plugin install linear@claude-plugins-official` |
 | GitHub Issues | `/plugin install github@claude-plugins-official` (needs `GITHUB_PERSONAL_ACCESS_TOKEN`) |
 | GitLab | `/plugin install gitlab@claude-plugins-official` |
-| Azure DevOps | `claude mcp add --transport http ado https://mcp.dev.azure.com/<org>` **[CLI line inferred]** |
+| Azure DevOps | `claude mcp add --transport http ado https://mcp.dev.azure.com/<org>` (add `--scope project` to share it) |
 | Rally | none found |
 
-## Tier 5: LLM / agent evals (not Claude packages, but what the kit's eval layer calls)
+## Tier 5: non-Claude eval libraries (for LLM / agent code)
 
 | Tool | For | Install |
 |---|---|---|
-| Pydantic AI `TestModel` / `FunctionModel` | Fake models in unit tests | part of `pydantic-ai` |
+| Pydantic AI `TestModel` / `FunctionModel` | Fake models in unit tests; `pydantic_ai.models.ALLOW_MODEL_REQUESTS = False` blocks real calls | part of `pydantic-ai` |
 | vcrpy / pytest-recording | Record/replay of provider traffic | `pip install pytest-recording` |
 | promptfoo | Prompt/agent evals, red-teaming, CI caching | `npx promptfoo@latest init` |
 | Inspect (UK AISI) | Sandboxed agent evals, epochs, clustered stderr | `pip install inspect-ai` |
@@ -93,9 +117,9 @@ Commit this in `.claude/settings.json` (the kit installer merges it for you):
 }
 ```
 
-Committing `enabledPlugins` doesn't download anything. Each person runs `claude plugin install <name>@claude-plugins-official --scope project` once (or accepts the prompt). In cloud sessions, the kit's SessionStart script does it.
+Committing `enabledPlugins` doesn't download anything. Each person runs `claude plugin install <name>@claude-plugins-official --scope project` once (or accepts the prompt). Cloud sessions and project threads don't use your local plugins: enable plugins on your claude.ai account or in Project settings.
 
-To ship the kit itself as a marketplace from `Sun-flow/claude-toolkit`:
+If the kit later moves into `Sun-flow/claude-toolkit` as a marketplace (round-1 proposal P2), that repo needs a `.claude-plugin/marketplace.json` first; then:
 
 ```json
 { "extraKnownMarketplaces": { "sun-flow-toolkit": { "source": { "source": "github", "repo": "Sun-flow/claude-toolkit" } } } }
@@ -109,11 +133,13 @@ To ship the kit itself as a marketplace from `Sun-flow/claude-toolkit`:
 - uses: anthropics/claude-code-action@v1   # pin to a SHA in real repos
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-    prompt: "/test-review"
-    claude_args: "--max-turns 15 --settings .claude/settings.json"
+    plugin_marketplaces: "https://github.com/anthropics/claude-plugins-official.git"
+    plugins: "pr-review-toolkit@claude-plugins-official"
+    prompt: "/test-review origin/main"
+    claude_args: "--max-turns 15"
 ```
 
-Or headless: `claude --bare -p "/run-tests" --settings .claude/settings.json --output-format json`. `--bare` skips CLAUDE.md, hooks and plugins unless passed back in. Fail the job when the init event lists `plugin_errors` or `mcp_server_errors` [R6 §2.8].
+Or headless in the checkout: `claude -p "/run-tests" --output-format stream-json --verbose`. Don't use `--bare` for kit tasks: it skips hooks (even with `--settings`) and skill discovery. To fail when a plugin or MCP server didn't load, read the first `system/init` event in the stream [R6 §2.8; round1-MECHANICS MECH-4, MECH-11].
 
 ## Cautions
 
