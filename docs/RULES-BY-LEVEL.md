@@ -13,7 +13,7 @@
 
 This decides which layer you can rely on. From the Claude Code docs, checked 2026-11-12 [round1-MECHANICS MECH-1, MECH-4]:
 
-| | Local session (CLI, desktop, IDE) | Cloud session on one repo | **Cloud thread in a claude.ai project** (how mae works) | `claude -p` in CI | `claude --bare -p` |
+| | Local session (CLI, desktop, IDE) | Cloud session on one repo | **Cloud thread in a claude.ai project**  | `claude -p` in CI | `claude --bare -p` |
 |---|---|---|---|---|---|
 | `CLAUDE.md` + unscoped `.claude/rules/*.md` | ✓ | ✓ | ✓ | ✓ | ✗ |
 | Rules with `paths:` | ✓ | ✓ | ✗ | ✓ | ✗ |
@@ -89,7 +89,7 @@ Installed by `python install.py --project <repo> [--profile minimal|standard|str
 | `/mutation-check` | Diff-scoped mutmut / Stryker / cargo-mutants / PIT / go-mutesting, survivors explained | Medium/high tier |
 | `/test-review` | The multi-agent review protocol over the branch's diff | Before a PR with test changes |
 
-If `claude-toolkit` already links a `run-tests` skill into the repo, the installer leaves the link alone and reports it. Merging the kit into the toolkit is proposed to mae (round-1 summary, P2).
+If `claude-toolkit` already links a `run-tests` skill into the repo, the installer leaves the link alone and reports it.
 
 ### CI (`--ci`; templates for Python/uv and Node/npm)
 
@@ -116,7 +116,7 @@ Not built yet (proposals): a mutation-score gate job for high tier, and per-path
 | | Keep `commands.fast` under the 2-minute Bash default; size parallelism to ~4 vCPU (`-n 4`). Credentials go in the environment's network secrets, not plain environment variables. |
 | **Devcontainer** (optional) | `kit/templates/env/devcontainer.json`: one image for people, CI and agents; non-root; nothing mounted from your home folder. |
 | **CI agent runs** | `anthropics/claude-code-action@v1` with `plugin_marketplaces` / `plugins` inputs, or `claude -p` in the checkout. Not `--bare`: it skips hooks even with `--settings`, and skips skill discovery. To fail when a plugin didn't load, use `--output-format stream-json --verbose` and read the first `system/init` event [MECH-4, MECH-11]. |
-| **Managed settings** | Only if the org is on Team/Enterprise (open question for mae). A managed hook applies to every repo, so it must exit 0 in repos without the kit; never point it at a repo-relative script with `onFailure: "block"` [MECH-6]. |
+| **Managed settings** | Only if the org is on Team/Enterprise (open question for the maintainer). A managed hook applies to every repo, so it must exit 0 in repos without the kit; never point it at a repo-relative script with `onFailure: "block"` [MECH-6]. |
 
 ---
 

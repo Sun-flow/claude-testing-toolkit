@@ -119,10 +119,10 @@ Commit this in `.claude/settings.json` (the kit installer merges it for you):
 
 Committing `enabledPlugins` doesn't download anything. Each person runs `claude plugin install <name>@claude-plugins-official --scope project` once (or accepts the prompt). Cloud sessions and project threads don't use your local plugins: enable plugins on your claude.ai account or in Project settings.
 
-If the kit later moves into `Sun-flow/claude-toolkit` as a marketplace (round-1 proposal P2), that repo needs a `.claude-plugin/marketplace.json` first; then:
+If this repo is later published as a plugin marketplace, it needs a `.claude-plugin/marketplace.json` first; then:
 
 ```json
-{ "extraKnownMarketplaces": { "sun-flow-toolkit": { "source": { "source": "github", "repo": "Sun-flow/claude-toolkit" } } } }
+{ "extraKnownMarketplaces": { "claude-testing-toolkit": { "source": { "source": "github", "repo": "Sun-flow/claude-testing-toolkit" } } } }
 ```
 
 **Limit:** agents shipped inside a plugin ignore `hooks`, `mcpServers` and `permissionMode` in their frontmatter [R6 follow-up F1]. So the `spec-test-writer` agent and the integrity hooks must be installed as repo files, not only as a plugin. That is why the kit has an installer.
