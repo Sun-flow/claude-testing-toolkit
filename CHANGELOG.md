@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-11-13): documentation is not production code
+
+Found by the first install into a real project: the CI gate reported the installed guidelines as production code that checks for a test environment.
+
+- The CI gate and the edit hook no longer apply TG-16 (code that detects tests) and TG-33 (coverage pragmas) to documentation (`.md`, `.markdown`, `.mdx`, `.rst`, `.txt`, `.adoc`), which may describe both. Code files are checked as before. Two new tests, seen to fail first.
+
 ## 0.4.0 (2026-11-13): drop into any repo, and stay there
 
 Found by installing the kit into existing Python, Node and Go repos and into one with its own Claude setup.

@@ -56,6 +56,27 @@ def test_adv2_2_ci_catches_sys_modules_test_detection(repo):
     assert guard.returncode == 1 and "TG-16" in guard.stdout
 
 
+DOC_ABOUT_TEST_DETECTION = ("# Notes\n\nNever ship `if 'pytest' in sys.modules:` or a check of `NODE_ENV === 'test'`,\n"
+                            "and never add `# pragma: no cover` to hide a line.\n")
+
+
+def test_docs_that_describe_test_detection_are_not_production_code_in_ci(repo):
+    branch(repo)
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs/notes.md").write_text(DOC_ABOUT_TEST_DETECTION, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "notes")
+    guard, _ = ci(repo)
+    assert guard.returncode == 0, guard.stdout
+    assert "TG-16" not in guard.stdout and "TG-33" not in guard.stdout
+
+
+def test_docs_that_describe_test_detection_are_not_production_code_in_the_hook(repo):
+    code, _, err = run_hook(repo, "guard_test_edits.py", {"tool_name": "Write", "tool_input": {
+        "file_path": str(repo / "docs/notes.md"), "content": DOC_ABOUT_TEST_DETECTION}})
+    assert code == 0, err
+
+
 def test_adv2_2_split_string_is_still_flagged_by_the_hook(repo):
     content = "import os\nT = os.environ.get('PYTEST_' + 'CURRENT_TEST')\n"
     code, _, _ = run_hook(repo, "guard_test_edits.py", {"tool_name": "Write", "tool_input": {

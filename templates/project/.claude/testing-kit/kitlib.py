@@ -436,6 +436,12 @@ TEST_ENV_RE = re.compile(
     r"import\.meta\.env\.(?:VITEST|MODE\s*===?\s*['\"]test)|['\"]test['\"]\s+in\s+sys\.argv|testing\.Testing\(\)|"
     r"\bunittest\b.*\bin\s+sys\.modules")
 NO_COVER_RE = re.compile(r"pragma:\s*no\s*cover|istanbul\s+ignore|c8\s+ignore|v8\s+ignore")
+PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc")
+
+
+def is_prose(path: str) -> bool:
+    """Documentation. It may describe test detection or coverage pragmas without being code (TG-16, TG-33)."""
+    return path.lower().endswith(PROSE_SUFFIXES)
 
 
 def test_names(text: str) -> list[str]:

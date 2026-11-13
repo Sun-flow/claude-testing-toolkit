@@ -76,7 +76,7 @@ def main() -> None:
         return
     if not kitlib.is_test_path(rel, cfg):
         # no `kit: allow` escape here: code that detects tests is never acceptable (TG-16)
-        if TEST_ENV_RE.search(added):
+        if TEST_ENV_RE.search(added) and not kitlib.is_prose(rel):
             kitlib.block(f"Testing kit review of {rel}: production code now checks whether it is running "
                          "under a test (e.g. PYTEST_CURRENT_TEST, NODE_ENV==='test', JEST_WORKER_ID). Code "
                          "must behave the same under test; implement the general logic instead (TG-16).")
