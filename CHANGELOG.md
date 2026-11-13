@@ -34,8 +34,8 @@
   interpreter name that exists on the machine (`python3` on Debian/Ubuntu).
 
 **Repo**
-- The kit has its own CI: Linux and macOS on Python 3.9 and 3.13 are required; Windows runs and reports
-  but doesn't fail the build yet.
+- The kit has its own CI on Linux, macOS and Windows, Python 3.9 to 3.13. Its first run found that the
+  installer crashed on Python 3.9 (`Path.write_text(newline=)` needs 3.10); fixed.
 
 ## 0.2.0 (2026-11-12)
 Fixes for the 40 findings of the second review round.

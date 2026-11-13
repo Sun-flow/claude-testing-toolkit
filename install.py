@@ -66,6 +66,12 @@ PROFILE_FILES["strict"] = PROFILE_FILES["standard"]
 MINIMAL_HOOK_SCRIPTS = {"protect_tests.py", "guard_bash.py", "bash_audit.py", "config_guard.py"}
 
 
+def _write(path: Path, text: str) -> None:
+    """Write with LF line endings on every platform (Path.write_text(newline=) needs Python 3.10)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
 class Plan:
     def __init__(self, dry: bool, force: bool):
         self.dry, self.force, self.log = dry, force, []
@@ -102,7 +108,7 @@ class Plan:
         if self.dry:
             return
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding="utf-8", newline="\n")
+        _write(dest, text)
         if executable and os.name != "nt":
             dest.chmod(0o755)
 
@@ -118,7 +124,7 @@ class Plan:
         self.note("create" if old is None else "update", dest, extra)
         if not self.dry:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(new, encoding="utf-8", newline="\n")
+            _write(dest, new)
 
     def report(self) -> str:
         width = max((len(k) for k, _, _ in self.log), default=6)

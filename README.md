@@ -119,7 +119,7 @@ python -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/python -m pytest -q tests
 ```
 
-Not yet tested on Windows or macOS, or live in GitHub Actions.
+The kit's own tests run in CI on Linux, macOS and Windows (Python 3.9 to 3.13). Not yet verified: the hooks live inside a Claude Code session, and the generated workflow templates running in GitHub Actions.
 
 ## Research
 
