@@ -15,6 +15,7 @@ Exit 1 when there is any BLOCK finding, unless ALLOW_TEST_CHANGES=1 is set
 """
 from __future__ import annotations
 
+import argparse
 import json
 from collections import Counter
 import os
@@ -26,6 +27,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
+from protect_tests import section_changed  # noqa: E402
 
 ASSERT_LINE = re.compile(r"\bassert\b|\bexpect\(|\bassert[A-Z]\w*\(|\bt\.(?:Error|Fatal)|\brequire\.|\bshould\b")
 FAILURE_PATH = re.compile(r"pytest\.raises|assertRaises|\.toThrow|\.rejects\b|assertThrows|require\.Error|"
@@ -36,7 +38,8 @@ IGNORED = ["**/__pycache__/**", "**/*.pyc"]
 
 
 def git(root: Path, *args: str) -> str:
-    out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, errors="replace")
+    out = subprocess.run(["git", "-c", "core.quotepath=off", *args], cwd=root, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
     if out.returncode != 0:
         raise SystemExit(f"git {' '.join(args)} failed: {out.stderr.strip()}")
     return out.stdout
@@ -59,12 +62,12 @@ def diff_lines(root: Path, base: str, path: str, old_path: str | None = None) ->
 
 
 def analyse(root: Path, base: str) -> dict:
-    cfg = kitlib.load_config(root)
     merge_base = git(root, "merge-base", base, "HEAD").strip()
+    cfg = kitlib.load_config_at(root, merge_base)  # the base's config: the branch can't redefine what a test is
     status = git(root, "diff", "--name-status", "-M", f"{merge_base}...HEAD")
     block, warn = [], []
     base_files = git(root, "ls-tree", "-r", "--name-only", merge_base).splitlines()
-    base_has_tests = any(kitlib.is_test_path(f, cfg) for f in base_files if not f.startswith(".claude/"))
+    base_has_tests = kitlib.has_tests(base_files, cfg)
     for line in status.splitlines():
         parts = line.split("\t")
         code, paths = parts[0], parts[1:]
@@ -85,9 +88,11 @@ def analyse(root: Path, base: str) -> dict:
                 block.append(f"harness file changed: {new_path} ({code})")
             continue
         sections = kitlib.harness_section_patterns(new_path, cfg)
-        if sections and code.startswith("M"):
-            from protect_tests import section_changed
-            if section_changed(new_path, show(root, merge_base, new_path), show(root, "HEAD", new_path), sections):
+        if sections and code[0] in "AMD":
+            # an added file counts too: a new setup.cfg can carry a [tool:pytest] section
+            before_text = show(root, merge_base, old_path) if code[0] != "A" else ""
+            after_text = show(root, "HEAD", new_path) if code[0] != "D" else ""
+            if section_changed(new_path, before_text, after_text, sections):
                 block.append(f"test/coverage configuration section changed in {new_path}")
         if code.startswith("D") and is_test_old:
             block.append(f"test file deleted: {old_path}")
@@ -133,12 +138,14 @@ def analyse(root: Path, base: str) -> dict:
 
 
 def main(argv: list[str]) -> int:
-    base = "origin/main"
-    if "--base" in argv:
-        base = argv[argv.index("--base") + 1]
+    ap = argparse.ArgumentParser(description="Did this branch weaken the test suite?")
+    ap.add_argument("--base", default="origin/main", help="branch or commit to compare with")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    base = a.base
     root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     r = analyse(root, base)
-    if "--json" in argv:
+    if a.json:
         print(json.dumps(r, indent=2))
     else:
         print(f"Test diff guard against {base} (merge base {r['merge_base'][:10]})")

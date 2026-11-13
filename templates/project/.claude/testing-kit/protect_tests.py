@@ -21,6 +21,7 @@ Guidelines: TG-14, TG-15, TG-17 in docs/testing/GUIDELINES.md.
 """
 from __future__ import annotations
 
+import ast
 import json
 from collections import Counter
 import re
@@ -104,11 +105,45 @@ def addition_problems(old: str, new: str) -> list[str]:
     shadowed = sorted(n for n in old_c if new_c[n] > old_c[n])
     if shadowed:
         problems.append("it defines existing test name(s) again, which would shadow them: " + ", ".join(shadowed))
-    rebound = sorted(imported_names(old) & set(MODULE_ASSIGN.findall(added)))
+    rebound = rebound_imports(old, new, added)
     if rebound:
-        problems.append("it reassigns imported name(s) at module level, which replaces the code under test: "
-                        + ", ".join(rebound))
+        problems.append("it rebinds imported name(s) at module level (a new import source, def, class or "
+                        "assignment), which replaces the code under test: " + ", ".join(rebound))
     return problems
+
+
+def module_bindings(text: str) -> dict[str, set[str]] | None:
+    """Python only: every module-level name and where it comes from ('import:calc', 'def', 'assign')."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    out: dict[str, set[str]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                out.setdefault(alias.asname or alias.name, set()).add(f"import:{'.' * node.level}{node.module or ''}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                out.setdefault(alias.asname or alias.name.split(".")[0], set()).add(f"import:{alias.name}")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.setdefault(node.name, set()).add("def")
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name):
+                        out.setdefault(sub.id, set()).add("assign")
+    return out
+
+
+def rebound_imports(old: str, new: str, added: str) -> list[str]:
+    """Names the old file imported that the new file also binds some other way."""
+    before, after = module_bindings(old), module_bindings(new)
+    if before is None or after is None:  # not Python (or not parseable): fall back to a line pattern
+        return sorted(imported_names(old) & set(MODULE_ASSIGN.findall(added)))
+    return sorted(name for name, sources in before.items()
+                  if all(s.startswith("import:") for s in sources) and after.get(name, set()) - sources)
 
 
 MODULE_ASSIGN = re.compile(r"^(\w+)\s*(?::[^=]*)?=(?!=)", re.M)

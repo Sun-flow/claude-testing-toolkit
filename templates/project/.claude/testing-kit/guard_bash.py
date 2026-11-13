@@ -31,6 +31,7 @@ INPLACE_FLAGS = re.compile(r"^-(?:[a-zA-Z]*i[a-zA-Z]*|-in-place)(?:=.*)?$")  # s
 GIT_WRITE = {"rm", "mv", "checkout", "restore", "reset", "apply", "clean"}
 INLINE_WRITE = re.compile(r"open\([^)]*['\"][wax]\+?b?['\"]|write_text|write_bytes|writeFileSync|writeFile\(|"
                           r"unlink|os\.remove|shutil\.(?:move|rmtree|copy)|fs\.rm|renameSync|Path\([^)]*\)\.rename")
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd"}
 REDIRECT = re.compile(r"(?:^|[^0-9&<>=-])>>?\s*([^\s;&|]+)")
 
 SNAPSHOT_UPDATE = re.compile(
@@ -58,7 +59,9 @@ def split_commands(command: str) -> list[list[str]]:
 
 def protected(token: str, root: Path, cfg: dict, cwd: Path | None = None) -> str | None:
     tok = token.strip("'\"")
-    if not tok or tok.startswith("-") or "=" in tok and not tok.startswith(("./", "/")):
+    if "=" in tok and not tok.startswith(("./", "/")):
+        tok = tok.split("=", 1)[1].strip("'\"")  # dd of=tests/x.py, --output=tests/x.py
+    if not tok or tok.startswith("-"):
         return None
     if cwd is not None and not Path(tok).is_absolute():
         tok = str(cwd / tok)  # after a `cd`, relative paths are relative to the new directory
@@ -75,13 +78,16 @@ def protected(token: str, root: Path, cfg: dict, cwd: Path | None = None) -> str
     return None
 
 
-def violations(command: str, root: Path, cfg: dict) -> list[str]:
+def violations(command: str, root: Path, cfg: dict, cwd: Path | None = None, depth: int = 0) -> list[str]:
     found = []
-    cwd = root
+    cwd = cwd or root
     for tokens in split_commands(command):
-        if tokens[0] in {"cd", "pushd", "Set-Location", "sl", "chdir"}:
-            dest = tokens[1] if len(tokens) > 1 else str(root)
-            cwd = Path(dest) if Path(dest).is_absolute() else cwd / dest
+        if tokens[0].lower() in {"cd", "pushd", "set-location", "sl", "chdir"}:
+            dest = tokens[1] if len(tokens) > 1 else ""
+            if not dest or dest == "-" or dest.startswith("~") or "$" in dest:
+                cwd = root  # can't tell where this goes; bash_audit still checks afterwards
+            else:
+                cwd = Path(dest) if Path(dest).is_absolute() else cwd / dest
             continue
         # strip leading env assignments and wrappers
         while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
@@ -95,8 +101,17 @@ def violations(command: str, root: Path, cfg: dict) -> list[str]:
             cmd = cmd[:-4]
         args = tokens[1:]
         targets = [r for r in (protected(a, root, cfg, cwd) for a in args) if r]
-        if cmd in WRITE_CMDS and targets:
+        if cmd in SHELLS and len(args) >= 2:
+            # bash -c "...", pwsh -Command "...": look inside the quoted script
+            for flag, script in zip(args, args[1:]):
+                if flag.lower() in {"-c", "-command", "/c", "-lc"}:
+                    found += violations(script, root, cfg, cwd, depth + 1) if depth < 3 else []
+        elif cmd == "eval" and args:
+            found += violations(" ".join(args), root, cfg, cwd, depth + 1) if depth < 3 else []
+        elif cmd in WRITE_CMDS and targets:
             found.append(f"`{cmd}` on {', '.join(targets)}")
+        elif cmd == "find" and targets and any(a in {"-delete", "-exec", "-execdir", "-ok"} for a in args):
+            found.append(f"`find` with -delete/-exec on {', '.join(targets)}")
         elif cmd in {"sed", "perl", "ruby"} and any(INPLACE_FLAGS.match(a) for a in args) and targets:
             found.append(f"in-place `{cmd}` on {', '.join(targets)}")
         elif cmd == "git" and args and args[0] in GIT_WRITE and targets:
@@ -112,7 +127,7 @@ def violations(command: str, root: Path, cfg: dict) -> list[str]:
                 if inner and INLINE_WRITE.search(code):
                     found.append(f"inline `{cmd}` writing {', '.join(inner)}")
     for m in REDIRECT.finditer(command):
-        rel = protected(m.group(1), root, cfg)
+        rel = protected(m.group(1), root, cfg, cwd) or protected(m.group(1), root, cfg)
         if rel:
             found.append(f"shell redirect into {rel}")
     return found

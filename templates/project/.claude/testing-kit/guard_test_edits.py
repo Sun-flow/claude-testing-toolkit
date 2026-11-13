@@ -74,13 +74,14 @@ def main() -> None:
         added = ti.get("content", "")
     else:
         return
-    added = _exempt(added)
     if not kitlib.is_test_path(rel, cfg):
+        # no `kit: allow` escape here: code that detects tests is never acceptable (TG-16)
         if TEST_ENV_RE.search(added):
             kitlib.block(f"Testing kit review of {rel}: production code now checks whether it is running "
                          "under a test (e.g. PYTEST_CURRENT_TEST, NODE_ENV==='test', JEST_WORKER_ID). Code "
                          "must behave the same under test; implement the general logic instead (TG-16).")
         return
+    added = _exempt(added)
     notes = []
     if kitlib.SLEEP_RE.search(added):
         notes.append("a hard wait (sleep/waitForTimeout). Wait on a condition, poll, or inject the clock instead (TG-28)")
@@ -96,7 +97,7 @@ def main() -> None:
             source = full.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             source = ""
-        names = [n for n in assertion_free_tests(source) if n in added]
+        names = [n for n in assertion_free_tests(source) if re.search(rf"\bdef\s+{re.escape(n)}\b", added)]
         if names:
             notes.append("test(s) with no assertion: " + ", ".join(names) +
                          ". Every test needs an assertion that fails if the behaviour breaks (TG-07)")

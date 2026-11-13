@@ -24,6 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
 SAFE_BASH = re.compile(r"^(?:ls|pwd|git\s+(?:status|log|diff\s+--stat|ls-files))\b")
+# git options that print file contents or diffs (git log -p would show the implementation)
+GIT_SHOWS_CODE = re.compile(r"(?:^|\s)(?:-p|-u|--patch|-U\d*|--unified\S*|-c|--cc|-L\S*|-S\S*|-G\S*|--word-diff\S*|"
+                            r"--full-diff|--ext-diff|--textconv|--output\S*)(?=\s|$)")
+SHELL_META = re.compile(r"[;&|`$<>\n]")
 
 
 DEFAULT_READABLE = ["docs/**", "doc/**", "specs/**", "spec/**", "README*", "*.md", "**/*.pyi", "**/*.d.ts",
@@ -76,10 +80,15 @@ def main() -> None:
             tokens = command.split()
         if any(under_src(t, root, src) for t in tokens if not t.startswith("-")):
             kitlib.block(reason + "That command touches implementation code.")
-        if re.search(r"[;&|`$<>]", command.replace("2>&1", "")) and not any(command.strip().startswith(c) for c in allowed):
-            kitlib.block(reason + "Run one test command at a time, without pipes or redirects.")
         cmd = command.strip()
-        if not (SAFE_BASH.match(cmd) or any(cmd == c or cmd.startswith(c + " ") for c in allowed)):
+        # A configured command may itself contain shell syntax; anything Claude adds after it may not.
+        prefix = max((c for c in allowed if cmd == c or cmd.startswith(c + " ")), key=len, default="")
+        extra = cmd[len(prefix):].replace("2>&1", "")
+        if SHELL_META.search(extra):
+            kitlib.block(reason + "Run one test command at a time, without pipes, redirects or chained commands.")
+        if not prefix and cmd.startswith("git") and GIT_SHOWS_CODE.search(cmd):
+            kitlib.block(reason + "That git option prints file contents; use `git log --oneline` or `git status`.")
+        if not (prefix or SAFE_BASH.match(cmd)):
             kitlib.block(reason + "Only the project's test commands and read-only git/ls are allowed here: "
                          + "; ".join(allowed or ["(none configured in .claude/testing-kit.json)"]))
 

@@ -22,6 +22,7 @@ uses `commands.setup` (optional) to install dependencies in each worktree.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -37,8 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
 
-def run(cmd, cwd: Path, check=True, shell=False) -> subprocess.CompletedProcess:
-    proc = subprocess.run(cmd, cwd=cwd, shell=shell, capture_output=True, text=True, errors="replace")
+def run(cmd, cwd: Path, check=True, shell=False, **kwargs) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, cwd=cwd, shell=shell, capture_output=True, text=True, errors="replace", **kwargs)
     if check and proc.returncode != 0:
         raise SystemExit(f"command failed: {cmd}\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
     return proc
@@ -71,6 +72,8 @@ def steers_runner(path: str, cfg: dict) -> bool:
     junit_dir = Path(cfg.get("junit_path", ".reports/junit.xml")).parent.as_posix()
     if junit_dir not in ("", ".") and path.startswith(junit_dir + "/"):
         return True
+    if kitlib.harness_section_patterns(path, cfg):
+        return True  # e.g. a setup.cfg or pyproject.toml the base doesn't have: it may carry runner config
     return name not in DEPENDENCY_FILES and "/" not in path and bool(CONFIG_LIKE.search(name))
 
 
@@ -94,27 +97,33 @@ def run_suite(tree: Path, cfg: dict) -> tuple[set[str], int, int]:
 
 
 def main(argv: list[str]) -> int:
-    base = argv[argv.index("--base") + 1] if "--base" in argv else "origin/main"
+    ap = argparse.ArgumentParser(description="The base branch's tests must still pass against this branch's code.")
+    ap.add_argument("--base", default="origin/main", help="branch or commit to compare with")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+    base = a.base
     root = Path(run(["git", "rev-parse", "--show-toplevel"], Path.cwd()).stdout.strip())
-    cfg = kitlib.load_config(root)
+    merge_base = run(["git", "merge-base", base, "HEAD"], root).stdout.strip()
+    # The base's config: the branch can't point this gate at a different command or report path.
+    cfg = kitlib.load_config_at(root, merge_base)
     if not (cfg.get("commands") or {}).get("fast"):
         print("No commands.fast in .claude/testing-kit.json; nothing to run.")
         return 2
-    merge_base = run(["git", "merge-base", base, "HEAD"], root).stdout.strip()
     work = Path(tempfile.mkdtemp(prefix="base-tests-"))
     base_tree, head_tree = work / "base", work / "head"
     try:
         run(["git", "worktree", "add", "--detach", str(base_tree), merge_base], root)
         run(["git", "worktree", "add", "--detach", str(head_tree), "HEAD"], root)
-        base_files = [f for f in run(["git", "ls-tree", "-r", "--name-only", merge_base], root).stdout.splitlines()
+        base_files = [f for f in run(["git", "-c", "core.quotepath=off", "ls-tree", "-r", "--name-only", merge_base], root).stdout.splitlines()
                       if protected(f, cfg)]
-        all_base = set(run(["git", "ls-tree", "-r", "--name-only", merge_base], root).stdout.splitlines())
-        all_head = run(["git", "ls-tree", "-r", "--name-only", "HEAD"], root).stdout.splitlines()
+        all_base = set(run(["git", "-c", "core.quotepath=off", "ls-tree", "-r", "--name-only", merge_base], root).stdout.splitlines())
+        all_head = run(["git", "-c", "core.quotepath=off", "ls-tree", "-r", "--name-only", "HEAD"], root).stdout.splitlines()
         head_only = [f for f in all_head if f not in all_base and (protected(f, cfg) or steers_runner(f, cfg))]
         for f in head_only:
             (head_tree / f).unlink(missing_ok=True)
-        if base_files:
-            run(["git", "checkout", merge_base, "--", *base_files], head_tree)
+        if base_files:  # via stdin, so thousands of test files don't overflow the command line
+            run(["git", "--literal-pathspecs", "checkout", merge_base, "--pathspec-from-file=-", "--pathspec-file-nul"], head_tree,
+                input="\0".join(base_files))
         before, total_before, base_rc = run_suite(base_tree, cfg)
         after, total_after, rc = run_suite(head_tree, cfg)
         head_failures = failures(head_tree / cfg.get("junit_path", ".reports/junit.xml"))
@@ -124,11 +133,11 @@ def main(argv: list[str]) -> int:
         shutil.rmtree(work, ignore_errors=True)
     lost = sorted(before - after)
     runner_mismatch = base_rc == 0 and rc != 0 and head_failures == 0
-    base_has_tests = any(kitlib.is_test_path(f, cfg) for f in all_base if not f.startswith(".claude/"))
+    base_has_tests = kitlib.has_tests(all_base, cfg)
     report = {"merge_base": merge_base, "base_passed": len(before), "base_total": total_before,
               "head_passed": len(after), "head_total": total_after, "now_failing": lost,
               "removed_from_head": head_only, "runner_exit_mismatch": runner_mismatch}
-    if "--json" in argv:
+    if a.json:
         print(json.dumps(report, indent=2))
     else:
         print(f"Base tests on this branch's code: {len(before)} passed on base, {len(after)} pass now.")
