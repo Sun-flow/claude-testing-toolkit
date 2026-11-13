@@ -18,6 +18,9 @@ DEFAULT_CONFIG = {
         "tests/**", "test/**", "**/tests/**", "**/test/**", "**/__tests__/**",
         "**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.py",
         "**/*_test.go", "**/*Test.java", "**/*Tests.cs",
+        # Other ecosystems, by file name. A folder named spec/ often holds specifications, so only *_spec.rb.
+        "**/Tests/**", "**/*.Tests/**", "**/*Test.cs", "**/*Test.kt", "**/*Tests.swift", "**/*Test.php",
+        "**/*_spec.rb", "**/*_test.rb", "**/*_test.exs", "**/*_test.dart",
         "**/__snapshots__/**", "**/*.snap", "**/snapshots/**", "**/testdata/**",
     ],
     "harness_globs": [
@@ -99,7 +102,7 @@ def load_config_at(root: Path, rev: str) -> dict:
     import subprocess
     try:
         out = subprocess.run(["git", "show", f"{rev}:.claude/testing-kit.json"], cwd=root, capture_output=True,
-                             text=True, errors="replace", timeout=30)
+                             text=True, encoding="utf-8", errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return load_config(root)
     if out.returncode != 0:
@@ -112,6 +115,28 @@ def load_config_at(root: Path, rev: str) -> dict:
     _merge_config(cfg, user if isinstance(user, dict) else {})
     cfg["_from_rev"] = rev
     return cfg
+
+
+def default_base(root: Path, fallback: str = "origin/main") -> str:
+    """What a pull request from this branch would be compared with: origin's default branch, or the
+    first of the usual names that exists. For running the CI gates by hand without --base."""
+    import subprocess
+
+    def git(*args: str) -> str | None:
+        try:
+            out = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8",
+                                 errors="replace", timeout=15)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return out.stdout.strip() if out.returncode == 0 else None
+
+    head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if head:
+        return head
+    for name in ("origin/main", "origin/master", "main", "master"):
+        if git("rev-parse", "--verify", "--quiet", name + "^{commit}"):
+            return name
+    return fallback
 
 
 # macOS and Windows filesystems are normally case-insensitive: TESTS/Test_x.py is the same file there.
@@ -161,11 +186,14 @@ def matches_any(rel: str, globs) -> bool:
 
 
 def is_test_path(rel: str, cfg: dict) -> bool:
-    return matches_any(rel, cfg["test_globs"])
+    # extra_test_globs: your own layout, on top of the built-in patterns.
+    # not_test_globs: production files that only look like tests (src/tools/test_runner.py).
+    return (matches_any(rel, cfg["test_globs"] + (cfg.get("extra_test_globs") or []))
+            and not matches_any(rel, cfg.get("not_test_globs") or []))
 
 
 def is_harness_path(rel: str, cfg: dict) -> bool:
-    return matches_any(rel, cfg["harness_globs"])
+    return matches_any(rel, cfg["harness_globs"] + (cfg.get("extra_harness_globs") or []))
 
 
 def has_tests(paths, cfg: dict) -> bool:
@@ -199,13 +227,131 @@ def head_content(root: Path, rel: str) -> str | None:
     return out.stdout.decode("utf-8", "replace")
 
 
-def read_hook_input() -> dict:
+# ---------------------------------------------------------------- per-session state
+# Small files under .claude/testing-kit/.state/ (git-ignored): what the working tree looked like when
+# the session started, the audit snapshots for shell commands, and the result of the last test run.
+
+STATE_DIR = ".claude/testing-kit/.state"
+STATE_TTL_S = 14 * 24 * 60 * 60  # files left by sessions older than this are deleted
+BIG_FILE = 5_000_000             # larger changed files are fingerprinted by size and time, not content
+
+
+def session_key(hook_input: dict | None) -> str:
+    sid = str((hook_input or {}).get("session_id") or "")
+    return "".join(c for c in sid if c.isalnum() or c in "-_")[:64] or "default"
+
+
+def state_path(root: Path, hook_input: dict | None, suffix: str) -> Path:
+    return root / STATE_DIR / f"{session_key(hook_input)}.{suffix}"
+
+
+def ensure_state_dir(root: Path) -> Path:
+    d = root / STATE_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    ignore = d / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8")  # so state never shows up as a change in the repo
+    return d
+
+
+def prune_state(root: Path) -> None:
+    import time
+    cutoff = time.time() - STATE_TTL_S
     try:
-        data = sys.stdin.read()
+        for f in (root / STATE_DIR).iterdir():
+            if f.name != ".gitignore" and f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+    except OSError:
+        pass
+
+
+def tree_fingerprint(root: Path) -> tuple[str, bool] | None:
+    """(fingerprint, has_uncommitted_changes) for the working tree as git sees it: the commit that is
+    checked out plus the content of every changed or untracked file. Ignored files don't count.
+    None when git can't say (not a repository, git missing, timeout)."""
+    import hashlib
+    import subprocess
+
+    def git(*args: str, timeout: int = 60):
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, timeout=timeout)
+
+    try:
+        top = git("rev-parse", "--show-toplevel", timeout=15)
+        if top.returncode != 0:
+            return None
+        head = git("rev-parse", "-q", "--verify", "HEAD", timeout=15)  # fails in a repo with no commit yet
+        status = git("status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if status.returncode != 0:
+        return None
+    toplevel = Path(os.fsdecode(top.stdout.strip()))  # status paths are relative to this, not to `root`
+    entries = sorted(e for e in status.stdout.split(b"\0") if e)
+    h = hashlib.sha256(head.stdout.strip() + b"\n")
+    for entry in entries:
+        h.update(entry + b"\0")
+        path = toplevel / os.fsdecode(entry[3:])
+        try:
+            if path.is_symlink():
+                h.update(b"L" + os.fsencode(os.readlink(path)))
+            elif path.is_dir():
+                h.update(b"D")  # a nested repository or submodule
+            else:
+                st = path.stat()
+                if st.st_size > BIG_FILE:
+                    h.update(f"S{st.st_size}:{st.st_mtime_ns}".encode())
+                else:
+                    h.update(hashlib.sha256(path.read_bytes()).digest())
+        except OSError:
+            h.update(b"-")  # deleted
+    return h.hexdigest(), bool(entries)
+
+
+def record_baseline(root: Path, hook_input: dict | None) -> None:
+    """Remember what the working tree looked like when this session started (once per session), so the
+    Stop hook can tell whether anything changed since. Called at SessionStart and, in case that hook
+    didn't run, before the first edit or shell command."""
+    path = state_path(root, hook_input, "base")
+    if path.exists():
+        return
+    fp = tree_fingerprint(root)
+    try:
+        ensure_state_dir(root)
+        path.write_text(fp[0] if fp else "unknown", encoding="utf-8")
+    except OSError:
+        return
+    prune_state(root)
+
+
+def read_state(root: Path, hook_input: dict | None, suffix: str) -> str | None:
+    try:
+        return state_path(root, hook_input, suffix).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def read_hook_input() -> dict:
+    """The JSON Claude Code sends on stdin. It is UTF-8, so it is read as bytes: a pipe on Windows is
+    otherwise decoded in the system code page, where an accent turns into other characters (an edit's old
+    text is then not found in the file) and some characters can't be read at all."""
+    try:
+        raw = getattr(sys.stdin, "buffer", None)
+        data = raw.read().decode("utf-8-sig", "replace") if raw is not None else sys.stdin.read()
         obj = json.loads(data) if data.strip() else {}
-    except ValueError:
+    except (ValueError, OSError, AttributeError):
         return {}
     return obj if isinstance(obj, dict) else {}
+
+
+def tolerant_output() -> None:
+    """For the scripts that print a report. A pipe on Windows uses the system code page: a character it
+    lacks (in a file name, a test name, a test runner's output) is shown as \\uXXXX instead of stopping
+    the script with UnicodeEncodeError."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):  # replaced by something that isn't a text file
+            pass
 
 
 def block(message: str) -> None:

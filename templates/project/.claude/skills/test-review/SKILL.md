@@ -1,9 +1,9 @@
 ---
 name: test-review
 description: Multi-agent review of the test changes on this branch - independent reviewers with different lenses in fresh contexts, verified findings, numbered proposals. Use before opening or merging a PR that adds or changes tests.
-argument-hint: "[base branch, default origin/main]"
+argument-hint: "[base branch, default {{BASE}}]"
 ---
-Base branch: $ARGUMENTS (if empty, use origin/main). Protocol: `docs/testing/REVIEW-PROTOCOL.md`.
+Base branch: $ARGUMENTS (if empty, use {{BASE}}). Protocol: `docs/testing/REVIEW-PROTOCOL.md`.
 
 1. Gather the evidence once: `git diff --stat <base>...HEAD`, `{{PY}} .claude/testing-kit/test_diff_guard.py --base <base>`, and the fast test run summary (`/run-tests`). Note the risk tier.
 2. Launch three `test-reviewer` agents **in parallel**, each with one lens and the evidence above, and nothing of your own conclusions:

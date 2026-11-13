@@ -61,6 +61,17 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{PY}} \"${CLAUDE_PROJECT_DIR}/.claude/testing-kit/tests_on_stop.py\" baseline",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
     "ConfigChange": [
       {
         "hooks": [

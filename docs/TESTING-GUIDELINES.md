@@ -84,7 +84,7 @@ Sources: [R1 §3.1, §3.4], [R2 G30–G32 and follow-up A], [R3 follow-up G24], 
 From [R3 §2].
 
 **Repos without a test runner yet.**
-- *Static website:* HTML validation (`html-validate`), link checking (`linkinator`), and a Playwright smoke test per page with an accessibility scan (`@axe-core/playwright`). Form validation logic in plain JS gets unit tests (TrackFlow's adversarial edge-case suite is the model).
+- *Static website:* HTML validation (`html-validate`), link checking (`linkinator`), and a Playwright smoke test per page with an accessibility scan (`@axe-core/playwright`). Form validation logic in plain JS gets unit tests, adversarial edge cases included.
 - *Game:* keep the rules in a pure-logic core that doesn't import the renderer; drive it with a seeded RNG and a fixed timestep; test it with properties (e.g. "health never goes below 0", "a save/load round-trip gives the same state") and short replayed input sequences.
 - *Bot or automation script:* fake the platform client (Discord, Telegram, an emulator) at the boundary; record and replay real payloads; test decisions as pure functions of the state.
 

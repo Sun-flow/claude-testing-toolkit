@@ -96,13 +96,19 @@ def render(r: dict, limit: int = 8) -> str:
 
 
 def main(argv: list[str]) -> int:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import kitlib
+    kitlib.tolerant_output()
     as_json = "--json" in argv
     paths = [Path(a) for a in argv if not a.startswith("--")]
     if not paths:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        import kitlib
         root = kitlib.project_dir()
-        paths = [root / kitlib.load_config(root).get("junit_path", ".reports/junit.xml")]
+        junit_path = kitlib.load_config(root).get("junit_path") or ""
+        if not junit_path:
+            print("No JUnit report is configured for this project (junit_path is empty in "
+                  ".claude/testing-kit.json). Report the test runner's own summary line instead.")
+            return 3
+        paths = [root / junit_path]
     paths = [p for p in paths if p.is_file()]
     if not paths:
         print("No JUnit report found. Configure your runner to write one (see .claude/testing-kit.json junit_path).")
