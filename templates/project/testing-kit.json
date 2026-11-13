@@ -1,13 +1,16 @@
 {
   "commands": {
-    "setup": "{{SETUP}}",
-    "fast": "{{FAST}}",
-    "full": "{{FULL}}",
+    "setup": "",
+    "fast": "",
+    "full": "",
     "mutation": ""
   },
-  "junit_path": ".reports/junit.xml",
-  "src_dirs": {{SRC_DIRS}},
-  "default_tier": "{{TIER}}",
+  "junit_path": "",
+  "runner_files": [],
+  "extra_test_globs": [],
+  "not_test_globs": [],
+  "src_dirs": ["src"],
+  "default_tier": "low",
   "high_paths": [],
   "spec_readable": ["docs/**", "specs/**", "spec/**", "README*", "*.md", "**/*.pyi", "**/*.d.ts", "openapi.*", "**/schema*.json"],
   "enforcement": "ask",

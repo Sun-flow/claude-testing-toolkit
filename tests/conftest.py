@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +9,17 @@ from pathlib import Path
 import pytest
 
 KIT = Path(__file__).resolve().parents[1]
+
+# The kit author's own people and projects. They must stay out of what the kit installs into other repos.
+# This file doesn't spell them either: it keeps the start of each name's SHA-256 (lower case).
+PRIVATE_WORDS = {"222e292d98107dd3", "a744834ed461ae1d", "ae30a9cffbdcacb4"}
+
+
+def lines_with_private_words(text: str) -> list:
+    """The numbers of the lines in `text` that name one of them (numbers, so a failure doesn't print the name)."""
+    return [number for number, line in enumerate(text.splitlines(), 1)
+            if any(hashlib.sha256(word.encode()).hexdigest()[:16] in PRIVATE_WORDS
+                   for word in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", line.lower()))]
 
 
 def git(repo: Path, *args: str) -> str:

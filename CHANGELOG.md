@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.4.0 (2026-11-13): drop into any repo, and stay there
+
+Found by installing the kit into existing Python, Node and Go repos and into one with its own Claude setup.
+
+**Guide**
+- New `docs/GUIDE.md`: set up, the live check that the hooks fire, daily use, configuration, stacks,
+  upkeep and troubleshooting. Installed into each repo as `docs/testing/KIT-GUIDE.md`.
+
+**Any repo**
+- Any stack works: `--fast`, `--full` and `--setup` set the test commands when they are not detected.
+  Python repos without packaging files are detected (pytest config or test files alone).
+- One workflow for every stack, `.github/workflows/testing-kit.yml`. Go, Rust and hand-given commands
+  get it too (there was no template for them). The command comes from your config and may contain
+  quotes, backslashes or several lines. The file was `tests.yml`, a name many repos use for their own
+  CI; an upgrade removes the old kit file.
+- The base-tests gate compares exit codes when the test command writes no JUnit report
+  (`"junit_path": ""`, as with `go test`, `cargo test` or `npm test`): coarser, but it still catches a
+  bug hidden by editing its test. Before, the gate could only say that no tests were collected.
+- Files the test command goes through (a Makefile, a script, an npm script) are recorded as
+  `runner_files` and taken from the base branch in CI.
+- New config keys `extra_test_globs`, `not_test_globs` and `extra_harness_globs` for layouts the built-in
+  patterns miss; test files of Ruby, Kotlin, C#, Swift, PHP, Elixir and Dart are recognised.
+- The gates, the skills and the workflow use the repo's default branch instead of assuming `main`.
+- CODEOWNERS entries go where the repo already keeps its CODEOWNERS (a new file in `.github/` would
+  switch off one kept at the root or in `docs/`).
+- The installer says which test files it recognises, and warns when the target is not the root of a git
+  repository.
+
+**Upkeep**
+- The installer records what it wrote in `.claude/testing-kit/manifest.json`. Re-running it upgrades:
+  untouched kit files are updated, files the kit dropped are removed, a rule, skill, agent, doc or
+  workflow you changed is kept (the new version goes beside it as `<name>.kit-new`), and the profile and
+  options of the last run are remembered. The scripts in `.claude/testing-kit/` are always replaced as a
+  set; one you had changed is saved as `<name>.yours`.
+- `--uninstall` removes the kit's hooks, permissions, `CLAUDE.md` block and unchanged files.
+- `--check` shows the installed version, what you changed, pending merges, a registered hook whose
+  script is missing, a `CLAUDE.md` block or workflow that no longer shows the config's command, and the
+  recognised test files. `--check --run` runs the fast tier once and times it.
+
+**Hooks**
+- End of turn: the fast tier runs only when the session changed something. A SessionStart hook notes
+  what the working tree looked like, so changes that were already there, turns that only read files, and
+  a state that already passed run nothing. A failing run is repeated once, then only reported until
+  something changes.
+- Protected sections of `package.json` (`"jest"`, `scripts.test`, ...) are compared now. The patterns
+  never matched before.
+
+**Fixed**
+- CI: the `base-tests` job never received the `allow-test-changes` label; the report upload was empty
+  (`.reports/` is a hidden folder); `cache: pip` and `cache: npm` were written without a file to key on;
+  a setup failure in the gate is explained; files that only pin a tool version (`.python-version`,
+  `.nvmrc`) stay in the branch copy.
+- Installer: a command with a quote, backslash or newline stopped it with a JSON error; `--owner @team`
+  wrote `@@team`; `settings.json` was rewritten with `\u` escapes and other indentation; an invalid
+  `settings.json` stopped the run after files were written; every kit file that differed counted as a
+  conflict; `--force` reset the config; `--check` mistook `pytest -m "not slow"`, `cd x && ...` and
+  `./script` for missing programs.
+- Windows: a hook read its input in the system code page, so an edit whose text had an accent or a curly
+  quote was not checked; it is read as UTF-8 now. The reports and the installer stopped with
+  `UnicodeEncodeError` on a name or runner output the pipe could not carry; such characters are shown as
+  `\uXXXX`. Git's answers (file names, the committed config) are read as UTF-8.
+
+**Tests**
+- 86 new tests in `tests/test_drop_in.py`. Each was seen to fail without its fix (run before the fix, or
+  with the fix undone in a scratch copy), except for the last Windows item (how git's output is decoded),
+  which no test can fail on Linux or macOS.
+- Four existing tests changed, on purpose. Three read `.github/workflows/testing-kit.yml` instead of
+  `tests.yml`, and one of them expects `python3 "$KIT/..."` where the workflow said `python`. The test
+  that keeps the author's own project names out of installed docs checks them by digest now; a new test
+  does the same for every installed file, and found one leftover reference in the guidelines (removed).
+
+**Not verified**
+- The hooks firing inside a live Claude Code session (the guide has a two-minute check), and the
+  generated workflow running in GitHub Actions (it passes `actionlint` for every detected stack).
+- The Windows fixes in a live session on Windows. The tests force a Windows code page onto the pipes, on
+  every system the suite runs on.
+
 ## 0.3.0 (2026-11-13): code-improvement pass
 
 **CI gates**

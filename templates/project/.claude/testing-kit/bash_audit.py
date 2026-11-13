@@ -23,8 +23,6 @@ sys.dont_write_bytecode = True  # never leave __pycache__ in the repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 
-STATE_DIR = ".claude/testing-kit/.state"
-
 
 def protected_files(root: Path, cfg: dict) -> list[str]:
     try:
@@ -51,42 +49,26 @@ def snapshot(root: Path, cfg: dict) -> dict:
     return {f: digest(root / f) for f in protected_files(root, cfg)}
 
 
-def _safe(value) -> str:
-    return "".join(c for c in str(value or "") if c.isalnum() or c in "-_")[:64]
-
-
 def state_file(root: Path, hi: dict) -> Path:
     """One snapshot per tool call, so Bash calls running in parallel don't overwrite each other's."""
-    sid = _safe(hi.get("session_id")) or "default"
-    call = _safe(hi.get("tool_use_id"))
-    return root / STATE_DIR / (f"{sid}-{call}.json" if call else f"{sid}.json")
-
-
-def record_session_start(root: Path, hi: dict) -> None:
-    """Remember the commit this session started from, so the Stop hook can tell that Claude committed."""
-    marker = root / STATE_DIR / f"{_safe(hi.get('session_id')) or 'default'}.head"
-    if marker.exists():
-        return
-    try:
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired):
-        return
-    if head.returncode == 0:
-        marker.write_text(head.stdout.strip(), encoding="utf-8")
+    call = "".join(c for c in str(hi.get("tool_use_id") or "") if c.isalnum() or c in "-_")[:64]
+    sid = kitlib.session_key(hi)
+    return root / kitlib.STATE_DIR / (f"{sid}-{call}.json" if call else f"{sid}.json")
 
 
 def main(mode: str) -> None:
     hi = kitlib.read_hook_input()
     root = kitlib.project_dir(hi)
+    if mode == "pre":
+        # In case SessionStart didn't run: the tree as it is before this session's first shell command.
+        kitlib.record_baseline(root, hi)
     if kitlib.allow_marker_present(root):
         return
     cfg = kitlib.load_config(root)
     sf = state_file(root, hi)
     if mode == "pre":
-        sf.parent.mkdir(parents=True, exist_ok=True)
-        (sf.parent / ".gitignore").write_text("*\n", encoding="utf-8")
+        kitlib.ensure_state_dir(root)
         sf.write_text(json.dumps(snapshot(root, cfg)), encoding="utf-8")
-        record_session_start(root, hi)
         return
     try:
         before = json.loads(sf.read_text(encoding="utf-8"))
