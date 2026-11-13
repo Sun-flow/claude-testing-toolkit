@@ -105,7 +105,7 @@ def analyse(root: Path, base: str) -> dict:
             block.append(f"test file renamed out of test discovery: {old_path} -> {new_path}")
             continue
         if not (is_test_old or is_test_new):
-            if code[0] in "AM":
+            if code[0] in "AM" and not kitlib.is_prose(new_path):
                 added, _ = diff_lines(root, merge_base, new_path)
                 if any(TEST_ENV_RE.search(a) for a in added):
                     block.append(f"production code checks for a test environment: {new_path} (TG-16)")
