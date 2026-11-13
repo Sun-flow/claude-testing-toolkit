@@ -228,7 +228,7 @@ def test_stop_is_allowed_after_a_blocked_report(repo):
 def test_second_stop_warns_the_user_instead_of_looping(repo):
     (repo / "src/calc/__init__.py").write_text("def add(a, b):\n    return a - b\n")
     code, out, _ = stop(repo, stop_hook_active=True)
-    assert code == 0 and "still fail" in out["systemMessage"]
+    assert code == 0 and "fast tests fail" in out["systemMessage"]
 
 
 # ------------------------------------------------------------ no_src_access

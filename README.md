@@ -72,7 +72,9 @@ When the hooks don't run, the CI checks are what holds. See `docs/RULES-BY-LEVEL
    protected files are caught before and after.
 3. **CI** (binding): `test_diff_guard.py` flags deleted/skipped tests and harness changes;
    `base_tests.py` runs the base branch's tests against the PR's code, so a bug hidden by editing its
-   test still fails.
+   test still fails. Both gates read `.claude/testing-kit.json` from the base branch, and the workflow
+   runs the gate scripts from the base branch's copy, so a PR can't redefine or edit its own gate.
+   (The workflow file itself still comes from the PR. That is what branch protection is for.)
 4. **Branch protection** (you set this up once): require the `all-green` check, require CODEOWNERS
    review for `.claude/`, `.github/` and test config, and block force pushes. Steps are in
    `docs/RULES-BY-LEVEL.md`. Without this, a PR can edit the workflow that checks it.
@@ -85,6 +87,22 @@ Overrides, all made by a person:
 What the checks can't do: the check for production code that detects tests (TG-16) is a pattern match that
 string tricks beat, so the `test-reviewer` agent and human review are the real gate there. Hooks are speed
 bumps; base-branch tests in CI plus branch protection are what bind.
+
+## How the repo is organised
+
+| Path | What it is |
+|---|---|
+| `install.py` | Detects the stack, copies the templates for the chosen profile, merges hooks into `.claude/settings.json`, adds the `CLAUDE.md` block. `--check` verifies an install. |
+| `templates/project/.claude/testing-kit/` | The hook scripts and CI gate scripts, all built on `kitlib.py` (config, path matching, patterns). |
+| `templates/project/.claude/{rules,agents,skills}/` | The always-loaded rules, the two agents and the four skills. |
+| `templates/ci/`, `templates/env/`, `templates/user/` | Workflow templates, cloud-session scripts, and the personal (`--user`) rules. |
+| `docs/`, `research/` | The guidelines and the reports they cite. |
+| `tests/` | The kit's own suite: it installs the kit into throwaway repos and feeds the hooks real input. |
+
+Hooks, by when they run: `protect_tests.py` (before an edit), `guard_bash.py` and `bash_audit.py pre`
+(before a shell command), `guard_test_edits.py` and `bash_audit.py post` (after), `tests_on_stop.py` (when
+Claude tries to finish), `config_guard.py` (on a settings change), `no_src_access.py` (inside the
+spec-test-writer agent only).
 
 ## Docs
 
