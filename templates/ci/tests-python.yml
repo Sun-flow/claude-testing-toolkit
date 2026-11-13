@@ -47,7 +47,15 @@ jobs:
       - env:
           BASE_REF: ${{ github.base_ref }}
           ALLOW_TEST_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'allow-test-changes') && '1' || '0' }}
-        run: python .claude/testing-kit/test_diff_guard.py --base "origin/$BASE_REF"
+        run: |
+          # Run the gate from the base branch's copy when it has one, so a PR can't edit its own gate.
+          KIT=.claude/testing-kit
+          if git cat-file -e "origin/$BASE_REF:.claude/testing-kit/kitlib.py" 2>/dev/null; then
+            mkdir -p "$RUNNER_TEMP/kit"
+            git archive "origin/$BASE_REF" .claude/testing-kit | tar -x -C "$RUNNER_TEMP/kit"
+            KIT="$RUNNER_TEMP/kit/.claude/testing-kit"
+          fi
+          python "$KIT/test_diff_guard.py" --base "origin/$BASE_REF"
 
   base-tests:
     # The base branch's tests (and harness) must still pass against this branch's code.
@@ -59,7 +67,15 @@ jobs:
         with: {fetch-depth: 0}
       {{CI_SETUP}}
       - env: {BASE_REF: "${{ github.base_ref }}"}
-        run: python .claude/testing-kit/base_tests.py --base "origin/$BASE_REF"
+        run: |
+          # Run the gate from the base branch's copy when it has one, so a PR can't edit its own gate.
+          KIT=.claude/testing-kit
+          if git cat-file -e "origin/$BASE_REF:.claude/testing-kit/kitlib.py" 2>/dev/null; then
+            mkdir -p "$RUNNER_TEMP/kit"
+            git archive "origin/$BASE_REF" .claude/testing-kit | tar -x -C "$RUNNER_TEMP/kit"
+            KIT="$RUNNER_TEMP/kit/.claude/testing-kit"
+          fi
+          python "$KIT/base_tests.py" --base "origin/$BASE_REF"
 
   all-green:
     # Make THIS the one required status check in the branch ruleset.

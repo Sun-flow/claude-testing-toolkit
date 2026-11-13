@@ -106,6 +106,20 @@ class Plan:
         if executable and os.name != "nt":
             dest.chmod(0o755)
 
+    def update(self, dest: Path, old: str | None, new: str, root: Path, extra: str) -> None:
+        """Write a file the installer merges into (settings.json, CLAUDE.md, .gitignore). `old` is its
+        current text, or None if it doesn't exist. Like write(), never goes through a symlink."""
+        if old == new:
+            self.note("same", dest)
+            return
+        if self._symlinked(dest, root):
+            self.note("SKIP (symlink)", dest, f"linked from elsewhere; add by hand: {extra}")
+            return
+        self.note("create" if old is None else "update", dest, extra)
+        if not self.dry:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(new, encoding="utf-8", newline="\n")
+
     def report(self) -> str:
         width = max((len(k) for k, _, _ in self.log), default=6)
         lines = [f"  {k:<{width}}  {p}" + (f"  ({e})" if e else "") for k, p, e in self.log]
@@ -122,7 +136,7 @@ def detect(root: Path) -> dict:
         d["stack"], d["ci"] = "python", "tests-python.yml"
         uv = (root / "uv.lock").exists()
         d["pm"] = "uv" if uv else "pip"
-        run = "uv run " if uv else "python -m "
+        run = "uv run " if uv else f"{PY} -m "  # the interpreter name that exists on this machine
         d["setup"] = "uv sync --locked" if uv else ("pip install -r requirements.txt"
                                                     if (root / "requirements.txt").exists() else "pip install -e .")
         d["fast"] = f"{run}pytest -q --junitxml=.reports/junit.xml"
@@ -299,7 +313,13 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
         plan.write(cfg_path, json.dumps(cfg, indent=2) + "\n", root)
 
     settings_path = root / ".claude" / "settings.json"
-    existing = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
+    settings_text = settings_path.read_text(encoding="utf-8") if settings_path.exists() else None
+    try:
+        existing = json.loads(settings_text) if settings_text and settings_text.strip() else {}
+        if not isinstance(existing, dict):
+            raise ValueError("not a JSON object")
+    except ValueError as exc:
+        raise SystemExit(f"{settings_path} is not valid JSON ({exc}). Fix it and re-run; nothing was merged into it.")
     fragment = json.loads(fill((T / "project" / "settings.fragment.json").read_text(encoding="utf-8"), values))
     keep = MINIMAL_HOOK_SCRIPTS if a.profile == "minimal" else None
     merged = merge_settings(existing, fragment, keep)
@@ -312,24 +332,14 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
              "timeout": 600}]})
         plan.write(root / ".claude/testing-kit/session_start.sh",
                    (T / "env" / "session_start.sh").read_text(encoding="utf-8"), root, executable=True)
-    if merged != existing:
-        plan.note("merge" if existing else "create", settings_path, "kit hooks and permissions")
-        if not a.dry_run:
-            settings_path.parent.mkdir(parents=True, exist_ok=True)
-            settings_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8", newline="\n")
-    else:
-        plan.note("same", settings_path)
+    unchanged = merged == existing and settings_text is not None
+    plan.update(settings_path, settings_text, settings_text if unchanged else json.dumps(merged, indent=2) + "\n",
+                root, "kit hooks and permissions")
 
     block = fill((T / "project" / "CLAUDE-block.md").read_text(encoding="utf-8"), block_values)
     claude_md = root / "CLAUDE.md"
     old_md = claude_md.read_text(encoding="utf-8") if claude_md.exists() else None
-    new_md = update_claude_md(claude_md, block)
-    if old_md == new_md:
-        plan.note("same", claude_md)
-    else:
-        plan.note("update" if old_md is not None else "create", claude_md, "## Testing block")
-        if not a.dry_run:
-            claude_md.write_text(new_md, encoding="utf-8", newline="\n")
+    plan.update(claude_md, old_md, update_claude_md(claude_md, block), root, "## Testing block")
 
     docs = docs_dir()
     if docs:
@@ -342,10 +352,7 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
     new_gi = ensure_lines(gi, [".claude/testing-kit/.state/", ".claude/testing-kit/__pycache__/",
                                ".claude/allow-test-edits", ".reports/",
                                ".claude/settings.local.json"])
-    if (gi.read_text(encoding="utf-8") if gi.exists() else "") != new_gi:
-        plan.note("update" if gi.exists() else "create", gi, "kit ignores")
-        if not a.dry_run:
-            gi.write_text(new_gi, encoding="utf-8", newline="\n")
+    plan.update(gi, gi.read_text(encoding="utf-8") if gi.exists() else None, new_gi, root, "kit ignores")
 
     plan.workflow = False
     if a.ci:
@@ -376,19 +383,20 @@ def install_user(home: Path, a: argparse.Namespace) -> Plan:
     plan.write(base / "rules/testing-habits.md", (T / "user/rules/testing-habits.md").read_text(encoding="utf-8"), home)
     plan.write(base / "agents/test-reviewer.md", (T / "user/agents/test-reviewer.md").read_text(encoding="utf-8"), home)
     sp = base / "settings.json"
-    existing = json.loads(sp.read_text(encoding="utf-8")) if sp.exists() else {}
-    allow = ["Bash(pytest *)", "Bash(python -m pytest *)", "Bash(uv run pytest *)", "Bash(npm test *)",
+    sp_text = sp.read_text(encoding="utf-8") if sp.exists() else None
+    try:
+        existing = json.loads(sp_text) if sp_text and sp_text.strip() else {}
+    except ValueError as exc:
+        raise SystemExit(f"{sp} is not valid JSON ({exc}). Fix it and re-run.")
+    allow = ["Bash(pytest *)", "Bash(python -m pytest *)", "Bash(python3 -m pytest *)", "Bash(uv run pytest *)",
+             "Bash(npm test *)",
              "Bash(npx vitest run *)", "Bash(npx jest *)", "Bash(go test *)", "Bash(cargo test *)"]
     merged = merge_settings(existing, {"permissions": {"allow": allow}}, None)
     if not merged.get("hooks"):
         merged.pop("hooks", None)
-    if merged != existing:
-        plan.note("merge" if existing else "create", sp, "test commands allowed")
-        if not a.dry_run:
-            sp.parent.mkdir(parents=True, exist_ok=True)
-            sp.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
-    else:
-        plan.note("same", sp)
+    unchanged = merged == existing and sp_text is not None
+    plan.update(sp, sp_text, sp_text if unchanged else json.dumps(merged, indent=2) + "\n", home,
+                "test commands allowed")
     return plan
 
 

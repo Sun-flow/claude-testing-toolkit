@@ -3,7 +3,7 @@
 
 Parsing commands can't catch every route (`python script.py`, `make`, a
 generated script ...). So before each Bash call this hook records a hash of
-every git-tracked test and harness file, and after the call it compares. Any
+every test and harness file git knows about (tracked, or untracked and not ignored), and after the call it compares. Any
 protected file that the command changed or deleted is reported back to Claude
 (exit 2 after the fact), with the fix: restore it with `git checkout -- <file>`
 or ask the user.
@@ -26,9 +26,11 @@ import kitlib  # noqa: E402
 STATE_DIR = ".claude/testing-kit/.state"
 
 
-def protected_tracked(root: Path, cfg: dict) -> list[str]:
+def protected_files(root: Path, cfg: dict) -> list[str]:
     try:
-        out = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, timeout=30)
+        # tracked files plus untracked ones that aren't ignored (a new test not yet committed)
+        out = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                             cwd=root, capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return []
     if out.returncode != 0:
@@ -46,12 +48,31 @@ def digest(path: Path) -> str:
 
 
 def snapshot(root: Path, cfg: dict) -> dict:
-    return {f: digest(root / f) for f in protected_tracked(root, cfg)}
+    return {f: digest(root / f) for f in protected_files(root, cfg)}
+
+
+def _safe(value) -> str:
+    return "".join(c for c in str(value or "") if c.isalnum() or c in "-_")[:64]
 
 
 def state_file(root: Path, hi: dict) -> Path:
-    sid = "".join(c for c in str(hi.get("session_id", "default")) if c.isalnum() or c in "-_")[:64]
-    return root / STATE_DIR / f"{sid or 'default'}.json"
+    """One snapshot per tool call, so Bash calls running in parallel don't overwrite each other's."""
+    sid = _safe(hi.get("session_id")) or "default"
+    call = _safe(hi.get("tool_use_id"))
+    return root / STATE_DIR / (f"{sid}-{call}.json" if call else f"{sid}.json")
+
+
+def record_session_start(root: Path, hi: dict) -> None:
+    """Remember the commit this session started from, so the Stop hook can tell that Claude committed."""
+    marker = root / STATE_DIR / f"{_safe(hi.get('session_id')) or 'default'}.head"
+    if marker.exists():
+        return
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if head.returncode == 0:
+        marker.write_text(head.stdout.strip(), encoding="utf-8")
 
 
 def main(mode: str) -> None:
@@ -65,6 +86,7 @@ def main(mode: str) -> None:
         sf.parent.mkdir(parents=True, exist_ok=True)
         (sf.parent / ".gitignore").write_text("*\n", encoding="utf-8")
         sf.write_text(json.dumps(snapshot(root, cfg)), encoding="utf-8")
+        record_session_start(root, hi)
         return
     try:
         before = json.loads(sf.read_text(encoding="utf-8"))
@@ -73,14 +95,16 @@ def main(mode: str) -> None:
                      f"({sf.relative_to(root) if sf.is_relative_to(root) else sf}), so changes to protected tests "
                      "can't be checked. Don't touch .claude/testing-kit/. Tell the user and run `git status` "
                      "to show what changed.")
+    if hi.get("tool_use_id"):
+        sf.unlink(missing_ok=True)  # per-call snapshot: done with it
     after = {f: digest(root / f) for f in before}
     changed = sorted(f for f in before if before[f] != after[f])
     if changed:
         listed = ", ".join(changed[:10]) + (f" (+{len(changed) - 10} more)" if len(changed) > 10 else "")
         kitlib.block(f"Testing kit: that shell command changed protected test/harness file(s): {listed}. "
-                     "Existing tests and harness are the specification (TG-14/TG-15). Restore them with "
-                     "`git checkout -- <file>` unless the user asked for this change, and tell the user "
-                     "what happened.")
+                     "Existing tests and harness are the specification (TG-14/TG-15). Unless the user asked for "
+                     "this change, undo it (for a committed file, `git checkout -- <file>`; the user will "
+                     "be asked to approve that) and tell the user what happened.")
 
 
 if __name__ == "__main__":

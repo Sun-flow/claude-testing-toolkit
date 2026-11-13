@@ -28,7 +28,7 @@ DEFAULT_CONFIG = {
         "karma.conf.*", ".mocharc*", "codecov.yml", ".codecov.yml",
         ".github/workflows/**", ".github/CODEOWNERS", "CODEOWNERS",
         ".claude/settings.json", ".claude/settings.local.json", ".claude/testing-kit/**",
-        "**/sitecustomize.py", "**/usercustomize.py", "**/*.pth", "**/__init__.py.pth",
+        "**/sitecustomize.py", "**/usercustomize.py", "**/*.pth",
         ".claude/testing-kit.json", ".claude/agents/**", ".claude/rules/testing.md",
     ],
     # Sections of shared manifests that are harness config. Edits that touch
@@ -42,7 +42,6 @@ DEFAULT_CONFIG = {
     "commands": {"fast": "", "full": "", "mutation": ""},
     "junit_path": ".reports/junit.xml",
     "stop_hook": {"enabled": True, "timeout_s": 300},
-    "max_attempts_note": 3,
     # "ask": the user approves or declines in Claude Code's permission prompt (default).
     # "deny": always refuse; the user edits the file or uses the allow marker.
     "enforcement": "ask",
@@ -76,22 +75,51 @@ def _load_config(root: str) -> dict:
             cfg["enforcement"] = "deny"
             cfg["_config_error"] = f".claude/testing-kit.json can't be read ({exc}); fix it"
             return cfg
-        for key, value in user.items():
-            if value is None:
-                continue
-            if isinstance(value, dict) and isinstance(cfg.get(key), dict):
-                cfg[key].update(value)
-            else:
-                cfg[key] = value
+        _merge_config(cfg, user)
     return cfg
+
+
+def _merge_config(cfg: dict, user: dict) -> None:
+    for key, value in user.items():
+        if value is None:
+            continue
+        if isinstance(value, dict) and isinstance(cfg.get(key), dict):
+            cfg[key].update(value)
+        else:
+            cfg[key] = value
 
 
 def load_config(root: Path) -> dict:
     return _load_config(str(root))
 
 
+def load_config_at(root: Path, rev: str) -> dict:
+    """The config as committed at `rev` (CI gates use the base branch's copy, so a pull request can't
+    point the gates at a different test command). Falls back to the working tree if `rev` has none."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "show", f"{rev}:.claude/testing-kit.json"], cwd=root, capture_output=True,
+                             text=True, errors="replace", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return load_config(root)
+    if out.returncode != 0:
+        return load_config(root)
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    try:
+        user = json.loads(out.stdout)
+    except ValueError:
+        return load_config(root)
+    _merge_config(cfg, user if isinstance(user, dict) else {})
+    cfg["_from_rev"] = rev
+    return cfg
+
+
+# macOS and Windows filesystems are normally case-insensitive: TESTS/Test_x.py is the same file there.
+CASE_INSENSITIVE_FS = sys.platform in ("darwin", "win32", "cygwin")
+
+
 @lru_cache(maxsize=None)
-def glob_to_regex(glob: str) -> re.Pattern:
+def glob_to_regex(glob: str, ignore_case: bool = False) -> re.Pattern:
     """Translate a gitignore-style glob (with **) to an anchored regex on posix paths."""
     i, out = 0, []
     while i < len(glob):
@@ -111,7 +139,7 @@ def glob_to_regex(glob: str) -> re.Pattern:
         else:
             out.append(re.escape(c))
         i += 1
-    return re.compile("^" + "".join(out) + "$")
+    return re.compile("^" + "".join(out) + "$", re.I if ignore_case else 0)
 
 
 def rel_posix(path: str | os.PathLike, root: Path) -> str:
@@ -127,8 +155,9 @@ def rel_posix(path: str | os.PathLike, root: Path) -> str:
 
 
 def matches_any(rel: str, globs) -> bool:
-    rel = rel.lstrip("./") if rel.startswith("./") else rel
-    return any(glob_to_regex(g).match(rel) for g in globs)
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return any(glob_to_regex(g, CASE_INSENSITIVE_FS).match(rel) for g in globs)
 
 
 def is_test_path(rel: str, cfg: dict) -> bool:
@@ -137,6 +166,11 @@ def is_test_path(rel: str, cfg: dict) -> bool:
 
 def is_harness_path(rel: str, cfg: dict) -> bool:
     return matches_any(rel, cfg["harness_globs"])
+
+
+def has_tests(paths, cfg: dict) -> bool:
+    """Does this file list contain project tests? (The kit's own test_*.py scripts don't count.)"""
+    return any(is_test_path(f, cfg) for f in paths if not f.startswith(".claude/"))
 
 
 def harness_section_patterns(rel: str, cfg: dict) -> list[str]:
@@ -251,7 +285,7 @@ BROAD_EXCEPT_RE = re.compile(r"except\s*(?:Exception|BaseException)?\s*:\s*(?:\n
 # Production code that behaves differently under a test (TG-16). A cheap heuristic: string tricks
 # beat it, so review (test-reviewer agent, a human) is the real gate.
 TEST_ENV_RE = re.compile(
-    r"PYTEST_CURRENT_TEST|PYTEST_|['\"]pytest['\"]\s+in\s+sys\.modules|sys\.modules\.get\(\s*['\"]pytest|"
+    r"PYTEST_|['\"]pytest['\"]\s+in\s+sys\.modules|sys\.modules\.get\(\s*['\"]pytest|"
     r"\b_pytest\b|NODE_ENV\s*[!=]==?\s*['\"]test['\"]|JEST_WORKER_ID|process\.env\.VITEST\b|"
     r"import\.meta\.env\.(?:VITEST|MODE\s*===?\s*['\"]test)|['\"]test['\"]\s+in\s+sys\.argv|testing\.Testing\(\)|"
     r"\bunittest\b.*\bin\s+sys\.modules")
