@@ -1,9 +1,9 @@
 # Testing Guidelines for Agent-Built Code
 
-> **Version** 0.2 (after review round 1) · **Date** 2026-11-12
+> **Version** 0.3 (after review round 2 and the blog follow-up) · **Date** 2026-11-13
 > **Import into a repo** with the kit installer (`python install.py --project <repo>`), which copies this file to `docs/testing/GUIDELINES.md` and adds the always-loaded short form `.claude/rules/testing.md`. Mention this file by path in CLAUDE.md; **don't `@import` it**, because an import loads all of it into every session. Agents read the section they need on demand.
 > **Weight:** rules marked **MUST** are the hard integrity rules (TG-04, 05, 13, 14–19); breaking one is never acceptable. The rest are SHOULD: deviate only with a stated reason.
-> **Evidence** for every rule is in `research/01..06` (cited as [R1]–[R6] with section) and the primary sources listed there.
+> **Evidence** for every rule is in `research/01..06` (cited as [R1]–[R6] with section; [R1b] is the blog follow-up, `research/01b-blog-followup.md`, cited by post title) and the primary sources listed there.
 
 These guidelines are for repositories where AI agents write a large share of the code and the tests. They apply to any language. Section 8 adds rules for code that calls LLMs or is itself an agent.
 
@@ -48,11 +48,12 @@ Sources: [R1 §3.1, §3.4], [R2 G30–G32 and follow-up A], [R3 follow-up G24], 
 - **TG-04. MUST. Red before green.** For a bug fix or new behaviour, write the test first. Run it, show it failing *for the expected reason*, then change production code. A test that was never red proves nothing [R5 rule 1, F9].
 - **TG-05. MUST. Expected values come from the spec, not from the code.** Derive them from the requirement, docs, a hand calculation or an independent reference. Never run the code under test and paste its output into the assertion. Add a short comment saying where each non-obvious value comes from [R1 §3.2; R5 rule 2].
 - **TG-06. If you can't state the expected output without running the code, don't write an exact-value assertion.** Use a property, a metamorphic relation, a differential oracle, or a human-approved snapshot instead [R3 §2].
-- **TG-07. Every test has an assertion that would fail if the behaviour broke.** `is not None`, a type check, `toHaveBeenCalled()` on its own, `assert True`, or no assertion at all doesn't count [R5 rule 5, F1].
+- **TG-07. Every test has an assertion that would fail if the behaviour broke.** `is not None`, a type check, `toHaveBeenCalled()` on its own, `assert True`, or no assertion at all doesn't count [R5 rule 5, F1]. An implicit check is acceptable only when a helper the test calls already fails on a bad result and that helper is itself tested; a script with no oracle at all is assist output (TG-50) [R1b "Assertions…Optional"].
 - **TG-08. Assert on observable behaviour:** return values, persisted state, emitted events, HTTP responses. Don't assert on private members or internal call order unless the order is the contract [R5 rule 3, F4].
 - **TG-09. Mock only at process boundaries:** network, clock, randomness, filesystem, third-party services. Never mock the unit under test or its in-process collaborators. Prefer fakes and in-memory implementations to mocks [R5 rule 4, F3].
 - **TG-10. Test the failure paths.** Every changed public behaviour gets error and boundary cases (invalid input, empty, limits, permission denied, upstream failure), not just the happy path. Purely confirmatory suites hide risk [R1 §2.3, §3.6].
-- **TG-11. Name tests for behaviour and condition** (`rejects_expired_token`), keep one behaviour per test, and parametrize cases that share a shape instead of copy-pasting [R3 G19; R5 F10].
+- **TG-11. Name tests for behaviour and condition** (`rejects_expired_token`), keep one behaviour per test (one behaviour, not one assertion: several checks on one slow setup are fine, ideally as soft assertions so every failed check shows), and parametrize cases that share a shape instead of copy-pasting [R3 G19; R5 F10; R1b "Stimulus, response, check"].
+- **TG-11a. Test each behaviour at the lowest layer that can see it** (unit before API, API before UI), and don't add a second test framework or runner without asking [R1b "Ten More Commandments"].
 - **TG-12. Build test data with builders or factories** that default to a valid object. Override only the fields the test is about [R3 G20].
 - **TG-13. MUST. A new test must actually run.** Show runner output that names the new tests and the count collected. A test file that collects zero tests is a failure [R5 F8].
 
@@ -63,6 +64,7 @@ Sources: [R1 §3.1, §3.4], [R2 G30–G32 and follow-up A], [R3 follow-up G24], 
 - **TG-16. MUST. Never special-case tests in production code.** No branches on test inputs, no `PYTEST_CURRENT_TEST` / `NODE_ENV==='test'` checks, no overridden `__eq__`, no early `sys.exit(0)` [R5 rule 8, F6–F7].
 - **TG-17. MUST. Never regenerate snapshots or golden files to make a failing test pass.** That covers `-u`, `--snapshot-update`, `cargo insta accept`, and a repo's own switches such as `UPDATE_GOLDEN=1`. Update only when the behaviour change is intended, and justify each changed hunk in the PR. In CI, run snapshot tests with writes disabled and unused snapshots failing: Jest `--ci`, syrupy's defaults, insta `INSTA_UPDATE=no` with `--unreferenced=reject` [R3 G11, G13, G26].
 - **TG-18. MUST. No retries, sleeps, longer timeouts or skips as a fix.** Fix the root cause or report it. Bounded reruns are allowed only on the CI command line, and a "passed on rerun" result is reported as *flaky*, never as clean [R4 U2, P13, P19].
+- **TG-18a. A workaround in a test states why it is harmless.** When test code tolerates a variation (dismisses an optional dialog, refreshes on an error page, logs in again), a comment says why that variation can't hide a product bug, and the test logs each time it takes the workaround. If it could hide a bug, write a test per variant or ask the user [R1b "Should Test Automation 'Just Handle It'?"].
 - **TG-19. MUST. You always have a sanctioned exit.** If you're stuck or a test looks wrong, stop and write a report starting with `BLOCKED:` (the failing test, what it expects, what happens, your evidence, what you need). Giving agents an explicit report-to-a-human option cut GPT-5's cheating from 54% to 9% [R5 §1]. Bound your loops too: the kit's convention is to stop after 3 failed attempts at the same failure (a convention, not an empirical number; feedback loops raised cheating modestly, 33% → 38%, and Beck lists loops as his first warning sign [R5 §1, rule 15]). The kit's Stop hook always lets a `BLOCKED:` report through.
 
 ## 5. Choosing a technique
@@ -98,7 +100,7 @@ Supporting rules:
 
 ## 6. Determinism and environment
 
-- **TG-27. Tests are hermetic.** Unit tests run in one process with no network, no real clock, no shared state and no order dependence. Enforce this with tooling: random order with a printed seed (pytest-randomly, Vitest `sequence.shuffle`), network blocked by default (pytest-socket with `--disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1`; plain `--disable-socket` breaks `asyncio.run`), an injected or frozen clock (time-machine, `vi.useFakeTimers`), per-test timeouts, `tmp_path`/`monkeypatch` isolation [R4 P2–P7].
+- **TG-27. Tests are hermetic.** Unit tests run in one process with no network, no real clock, no shared state and no order dependence. Enforce this with tooling: random order with a printed seed (pytest-randomly, Vitest `sequence.shuffle`), network blocked by default (pytest-socket with `--disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1`; plain `--disable-socket` breaks `asyncio.run`), an injected or frozen clock (time-machine, `vi.useFakeTimers`), per-test timeouts, `tmp_path`/`monkeypatch` isolation [R4 P2–P7]. No hardcoded calendar dates that go stale (a test that breaks when July becomes August), and no test that depends on another test having run [R1b "Ten More Commandments"].
 - **TG-28. No hard waits.** Use polling, callbacks or auto-waiting assertions instead of `sleep`/`waitForTimeout` [R4 P22].
 - **TG-28a. Build testability seams.** Tests should be able to start from any state: seed data through APIs, factories or fixtures (not the UI), reuse logged-in state, inject the clock. When the app has no seam, file a testability issue rather than writing a long sequential end-to-end script [R1 §3.8; R4 follow-up 3].
 - **TG-28b. Make failures diagnosable.** A failing test should show the input, the actual result and the expected result without a rerun: descriptive assertion messages, logged stimulus and response for integration tests [R1 §3.7].
@@ -106,7 +108,7 @@ Supporting rules:
 - **TG-30. Real dependencies run in containers** (Testcontainers or localhost services), never shared staging or production [R4 P10].
 - **TG-31. One documented command per tier.** `make test` (or `npm test`) equals the PR gate and finishes in under 2 minutes in a cloud agent box; slower tiers have their own commands and tags. List them in `CLAUDE.md` [R4 P1, P20, E5].
 - **TG-31a. Keep a smoke check on every deploy** that answers "is this egregiously broken?" in seconds [R1 §3.12].
-- **TG-32. Flaky tests are quarantined with an owner and an expiry date**, keep running and keep reporting. A scheduled job re-runs tests many times to find intermittent product bugs instead of retrying them away [R4 P12, P18].
+- **TG-32. Flaky tests are quarantined with an owner and an expiry date**, keep running and keep reporting. A scheduled job re-runs tests many times to find intermittent product bugs instead of retrying them away; run it no more often than the team can triage, treat each intermittent failure as a possible product bug before calling it flaky, and allow long runs without restarts there (this tier is exempt from TG-27's isolation) [R4 P12, P18; R1b "Periodic Automation"].
 
 ## 7. Quality gates
 
@@ -146,7 +148,7 @@ From [R2 §2]. Rules:
 
 ## 9. Reporting
 
-- **TG-49. Every test or eval run summary has four parts:** what ran (command, counts, seed), what failed (grouped by root cause, not 300 red lines), **what was not tested** (skipped, xfail, deselected tiers, configurations not covered), and anomalies seen [R1 §3.5; R4 P21; R2 G35].
+- **TG-49. Every test or eval run summary has four parts:** what ran (command, counts, seed), what failed (grouped by root cause, not 300 red lines), **what was not tested** (skipped, xfail, deselected tiers, configurations not covered), and anomalies seen (tests that passed but ran much slower than usual, product-log warnings during end-to-end runs) [R1 §3.5; R4 P21; R2 G35]. A non-pass status (warn, inconclusive, skipped) is never counted as a pass; add such a status only if it has its own action and stands out in the report [R1b "Did The Script Pass?"].
 - **TG-50. Keep "assist" output apart from tests.** Crawlers, diffs and data generators that need human triage go in their own directory or marker (`@pytest.mark.assist`). They never gate merges and are never counted as passing tests. Anything counted as a test needs a falsifiable oracle [R1 §3.10; R5 §7].
 
 ## 10. Review checklist (fresh context, cite file:line for each finding)
