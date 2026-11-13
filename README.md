@@ -3,66 +3,71 @@
 A drop-in set of rules, hooks, agents, skills and CI checks that help Claude Code (and people) build
 honest, effective test suites, and that make it hard to "pass" by weakening the tests.
 
-Standard library Python only. Hooks need **Python ≥ 3.9** on PATH. Built against Claude Code 2.1.x
-hooks (PreToolUse, PostToolUse, Stop, ConfigChange).
+Standard library Python only. Hooks need **Python ≥ 3.9** on PATH and a git repository. Built against
+Claude Code 2.1.x hooks (PreToolUse, PostToolUse, Stop, SessionStart, ConfigChange).
 
-## Install
+**New here? Read [`docs/GUIDE.md`](docs/GUIDE.md)**: set up, the two-minute check that the hooks fire, daily
+use, configuration, upkeep and troubleshooting. The installer copies it into each repo as
+`docs/testing/KIT-GUIDE.md`.
+
+## Quick start
 
 ```bash
-# into an existing or fresh repo
-python install.py --project /path/to/repo                 # standard profile
-python install.py --project /path/to/repo --profile minimal
-python install.py --project /path/to/repo --profile strict --ci --owner @your-team --env
-python install.py --project /path/to/repo --dry-run       # show the plan, write nothing
+git clone https://github.com/Sun-flow/claude-testing-toolkit && cd claude-testing-toolkit
 
-# your own habits, for every repo (~/.claude)
-python install.py --user
-
-# is everything wired up?
-python install.py --check /path/to/repo
+python3 install.py --project /path/to/repo --ci --dry-run   # show the plan, write nothing
+python3 install.py --project /path/to/repo --ci             # install (standard profile, with CI gates)
+python3 install.py --check /path/to/repo --run              # are the hooks wired up? is the fast tier green and quick?
 ```
 
-The installer detects the stack (Python with uv or pip, Node with vitest or jest, Go, Rust) and fills in
-the test commands in `.claude/testing-kit.json`. Check them after installing.
+Then restart Claude Code in the repo, commit, and switch on branch protection (the guide has the steps).
+On Windows, type `py` or `python` where the examples say `python3`.
 
-It is safe to re-run. It never overwrites a file you changed (it writes `name.kit-new` next to it),
-never writes through a symlink, merges into an existing `.claude/settings.json` rather than replacing it,
-and keeps one marked block in `CLAUDE.md`.
+The installer detects Python (pip or uv, with or without packaging files), Node (Vitest, Jest or an npm
+test script), Go and Rust, and fills in the test commands. For anything else, give the command:
+`--fast "make test"`. It prints the command it chose and the test files it recognises; check both.
+
+```bash
+python3 install.py --project /path/to/repo                  # again, later: upgrade to this version of the kit
+python3 install.py --project /path/to/repo --profile strict --ci --owner your-team --env
+python3 install.py --uninstall /path/to/repo                # take it out again
+python3 install.py --user                                   # your own habits, for every repo (~/.claude)
+```
+
+Re-running is safe, and it is how you upgrade. The installer records what it wrote in
+`.claude/testing-kit/manifest.json`, so the next run updates the files you haven't touched, keeps a rule,
+skill or workflow you changed (the kit's version goes beside it as `name.kit-new`), keeps your
+`.claude/testing-kit.json`, and remembers the profile and options you chose. It never writes through a
+symlink, merges into an existing `.claude/settings.json` rather than replacing it, and keeps one marked
+block in `CLAUDE.md`.
 
 ## Profiles
 
 | Profile | What you get |
 |---|---|
 | minimal | Guard hooks only: protect tests and test config, guard Bash writes, audit Bash, guard settings changes |
-| standard | Minimal + test-quality feedback after edits, run fast tests on Stop, the spec-only test writer and test reviewer agents, skills `/write-tests`, `/run-tests`, `/mutation-check`, `/test-review` |
+| standard | Minimal + test-quality feedback after edits, run fast tests when Claude finishes a turn with changes, the spec-only test writer and test reviewer agents, skills `/write-tests`, `/run-tests`, `/mutation-check`, `/test-review` |
 | strict | Standard + `enforcement: deny` (no "ask" prompts, blocked outright) and default risk tier medium |
 
-`--ci` adds a GitHub workflow matched to the detected stack and package manager (tests, test-diff guard,
-base-branch tests, and a weekly flake finder for Python). With `--owner`, it also writes CODEOWNERS for the
-test harness. `--env` adds a SessionStart script for cloud sessions.
-
-## After installing
-
-1. Check the commands in `.claude/testing-kit.json` (the installer guessed them), then run
-   `python install.py --check /path/to/repo`. It checks the hooks run and the fast command can start.
-2. Restart Claude Code. Hooks load when a session starts.
-3. Commit. CI treats the commit that adds the kit as a harness change, so that first PR needs the
-   `allow-test-changes` label.
-4. On GitHub (with `--ci`):
-   - create a label named `allow-test-changes`. Only people who can approve test changes should add it;
-   - in the branch ruleset, make `all-green` a required check, block force pushes, and (with `--owner`)
-     require Code Owner review.
+`--ci` adds one GitHub workflow, `.github/workflows/testing-kit.yml`, with the setup steps for the detected
+stack and package manager: the fast tier, the test-diff guard, the base-branch tests, and `all-green`. Its
+name can't collide with a `tests.yml` or `ci.yml` you already have. Python repos also get a weekly flake
+finder. With `--owner`, it writes CODEOWNERS for the test harness. `--env` adds a SessionStart script for
+cloud sessions.
 
 ## What loads where
 
-| Where Claude runs | Rules | Hooks, agents, skills |
-|---|---|---|
-| Claude Code CLI / desktop / IDE in the repo | yes | yes |
-| Claude Code on the web with the repo checked out | yes | yes |
-| `claude -p` in CI | yes | project hooks and skills yes, unless `--bare`; subagent frontmatter hooks no (so the spec-test-writer's allowlist doesn't apply) |
-| A claude.ai chat or project thread that only reads files | no | no |
+| Where Claude runs | Rules | Skills | Hooks and agents |
+|---|---|---|---|
+| Claude Code CLI / desktop / IDE in the repo | yes | yes | yes |
+| Claude Code on the web with the repo checked out | yes | yes | yes |
+| `claude -p` in CI | yes | yes, unless `--bare` | project hooks yes, unless `--bare`; subagent frontmatter hooks no (so the spec-test-writer's allowlist doesn't apply) |
+| A claude.ai project thread with the repo attached | yes | yes | not confirmed: assume no |
+| A chat that only reads files | no | no | no |
 
-When the hooks don't run, the CI checks are what holds. See `docs/RULES-BY-LEVEL.md`.
+The project-thread row is what one such thread loaded on 2026-11-13 (rules and skills, including ones in
+nested `.claude` folders); the rest is from the Claude Code documentation. When the hooks don't run, the CI
+checks are what holds. See `docs/RULES-BY-LEVEL.md`.
 
 ## Layers
 
@@ -72,8 +77,11 @@ When the hooks don't run, the CI checks are what holds. See `docs/RULES-BY-LEVEL
    protected files are caught before and after.
 3. **CI** (binding): `test_diff_guard.py` flags deleted/skipped tests and harness changes;
    `base_tests.py` runs the base branch's tests against the PR's code, so a bug hidden by editing its
-   test still fails. Both gates read `.claude/testing-kit.json` from the base branch, and the workflow
-   runs the gate scripts from the base branch's copy, so a PR can't redefine or edit its own gate.
+   test still fails. It compares test by test when the runner writes JUnit XML, and exit codes when it
+   doesn't (`go test`, `cargo test`, a Makefile target). Both gates read `.claude/testing-kit.json` from
+   the base branch, and the workflow runs the gate scripts from the base branch's copy, so a PR can't
+   redefine or edit its own gate. Files the test command goes through (a Makefile, a script, an npm
+   script) are taken from the base too.
    (The workflow file itself still comes from the PR. That is what branch protection is for.)
 4. **Branch protection** (you set this up once): require the `all-green` check, require CODEOWNERS
    review for `.claude/`, `.github/` and test config, and block force pushes. Steps are in
@@ -92,20 +100,22 @@ bumps; base-branch tests in CI plus branch protection are what bind.
 
 | Path | What it is |
 |---|---|
-| `install.py` | Detects the stack, copies the templates for the chosen profile, merges hooks into `.claude/settings.json`, adds the `CLAUDE.md` block. `--check` verifies an install. |
+| `install.py` | Detects the stack, copies the templates for the chosen profile, merges hooks into `.claude/settings.json`, adds the `CLAUDE.md` block, and records it all in a manifest. Re-running upgrades; `--check` verifies an install; `--uninstall` removes it. |
 | `templates/project/.claude/testing-kit/` | The hook scripts and CI gate scripts, all built on `kitlib.py` (config, path matching, patterns). |
 | `templates/project/.claude/{rules,agents,skills}/` | The always-loaded rules, the two agents and the four skills. |
-| `templates/ci/`, `templates/env/`, `templates/user/` | Workflow templates, cloud-session scripts, and the personal (`--user`) rules. |
+| `templates/ci/`, `templates/env/`, `templates/user/` | The workflow template (one for every stack), cloud-session scripts, and the personal (`--user`) rules. |
 | `docs/`, `research/` | The guidelines and the reports they cite. |
 | `tests/` | The kit's own suite: it installs the kit into throwaway repos and feeds the hooks real input. |
 
-Hooks, by when they run: `protect_tests.py` (before an edit), `guard_bash.py` and `bash_audit.py pre`
-(before a shell command), `guard_test_edits.py` and `bash_audit.py post` (after), `tests_on_stop.py` (when
-Claude tries to finish), `config_guard.py` (on a settings change), `no_src_access.py` (inside the
-spec-test-writer agent only).
+Hooks, by when they run: `tests_on_stop.py baseline` (when a session starts: it notes what the working
+tree looks like), `protect_tests.py` (before an edit), `guard_bash.py` and `bash_audit.py pre` (before a
+shell command), `guard_test_edits.py` and `bash_audit.py post` (after), `tests_on_stop.py` (when Claude
+tries to finish: it runs the fast tier if the session changed something), `config_guard.py` (on a settings
+change), `no_src_access.py` (inside the spec-test-writer agent only).
 
 ## Docs
 
+- `docs/GUIDE.md`: set up, use and upkeep of the kit (installed as `docs/testing/KIT-GUIDE.md`).
 - `docs/TESTING-GUIDELINES.md`: rules TG-01..TG-50 with reasons and sources (installed as
   `docs/testing/GUIDELINES.md`).
 - `docs/RULES-BY-LEVEL.md`: user, project and environment rules, profiles, CI, branch protection.
@@ -119,7 +129,10 @@ python -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/python -m pytest -q tests
 ```
 
-The kit's own tests run in CI on Linux, macOS and Windows (Python 3.9 to 3.13). Not yet verified: the hooks live inside a Claude Code session, and the generated workflow templates running in GitHub Actions.
+The kit's own tests run in CI on Linux, macOS and Windows (Python 3.9 to 3.13). They install the kit into
+throwaway repos and feed the hooks the input Claude Code sends. Not yet verified: the hooks firing inside a
+live Claude Code session (the guide has a two-minute check for that), and the generated workflow running in
+GitHub Actions (it passes `actionlint` for pip, uv, npm, pnpm, yarn, Go, Rust and hand-given commands).
 
 ## Research
 

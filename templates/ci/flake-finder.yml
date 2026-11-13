@@ -19,4 +19,4 @@ jobs:
       - name: Repeat run (seed is printed by pytest-randomly)
         run: {{FLAKE_RUN}} -p randomly --count=5 -x -q --junitxml=.reports/junit-${{ matrix.round }}.xml
       - if: ${{ !cancelled() }}
-        run: python .claude/testing-kit/test_report.py .reports/junit-${{ matrix.round }}.xml || true
+        run: python3 .claude/testing-kit/test_report.py .reports/junit-${{ matrix.round }}.xml || true

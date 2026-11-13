@@ -322,6 +322,6 @@ def test_ci_template_runs_the_gates_from_the_base_branch(tmp_path):
     r.mkdir()
     (r / "requirements.txt").write_text("")
     install(r, "--ci")
-    yml = (r / ".github/workflows/tests.yml").read_text()
+    yml = (r / ".github/workflows/testing-kit.yml").read_text()
     assert yml.count('git archive "origin/$BASE_REF" .claude/testing-kit') == 2
-    assert 'python "$KIT/base_tests.py"' in yml and 'python "$KIT/test_diff_guard.py"' in yml
+    assert 'python3 "$KIT/base_tests.py"' in yml and 'python3 "$KIT/test_diff_guard.py"' in yml
