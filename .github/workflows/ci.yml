@@ -14,8 +14,6 @@ jobs:
   test:
     name: ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # Windows has not been verified yet: its result is reported but doesn't fail the run.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
