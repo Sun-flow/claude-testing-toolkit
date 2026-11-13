@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import KIT, decision, git, run_hook
+from conftest import KIT, decision, git, lines_with_private_words, run_hook
 from test_ci_and_install import branch, install, py
 from test_hooks import bash, edit, write
 
@@ -247,7 +247,7 @@ def test_mech2_4_pip_projects_get_pip_ci(tmp_path):
     r.mkdir()
     (r / "requirements.txt").write_text("")
     assert install(r, "--ci").returncode == 0
-    yml = (r / ".github/workflows/tests.yml").read_text()
+    yml = (r / ".github/workflows/testing-kit.yml").read_text()
     assert "uv sync" not in yml and "pip install -r requirements.txt" in yml and "{{CI_" not in yml
     assert "labeled" in yml and "hashFiles" in yml
     assert "pytest-randomly" in (r / ".github/workflows/flake-finder.yml").read_text()
@@ -257,7 +257,7 @@ def test_mech2_6_7_8_node_ci_matches_the_package_manager(tmp_path):
     r = make_node(tmp_path, {"jest": "^29"}, "pnpm-lock.yaml")
     out = install(r, "--ci")
     assert out.returncode == 0 and "jest-junit" in out.stdout
-    yml = (r / ".github/workflows/tests.yml").read_text()
+    yml = (r / ".github/workflows/testing-kit.yml").read_text()
     assert "pnpm install --frozen-lockfile" in yml and ".nvmrc" not in yml and "{{CI_" not in yml
     assert not (r / ".github/workflows/flake-finder.yml").exists()
 
@@ -276,7 +276,8 @@ def test_mech2_12_profile_downgrade_removes_the_stop_hook(repo):
 
 def test_use2_6_installed_docs_are_neutral(repo):
     text = (repo / "docs/testing/REVIEW-PROTOCOL.md").read_text()
-    assert "EDGE-CASE-FINDINGS" not in text
+    found = lines_with_private_words(text)
+    assert not found, f"lines that name the kit author's own people or projects: {found}"
 
 
 def test_use2_11_check_reports_a_fast_command_that_cannot_run(repo):

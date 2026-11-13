@@ -186,13 +186,25 @@ def _ini_sections(text: str, patterns: list[str]) -> str:
     return "\n".join(out)
 
 
+def _json_key(pattern: str) -> list[str]:
+    """The key a JSON section pattern names: `"jest"\\s*:` -> ["jest"]; `scripts.test` -> ["scripts", "test"]."""
+    quoted = re.search(r'"([^"]+)"', pattern)
+    key = quoted.group(1) if quoted else re.sub(r"\\.|[^A-Za-z0-9_.@/-]", "", pattern)
+    return key.split(".")
+
+
 def _json_sections(text: str, patterns: list[str]) -> str:
     try:
         data = json.loads(text)
     except ValueError:
         return text  # unparsable: compare whole file conservatively
-    keys = [re.sub(r'[^A-Za-z0-9_-]', "", p.split(":")[0]) for p in patterns]
-    return json.dumps({k: data.get(k) for k in keys if isinstance(data, dict)}, sort_keys=True)
+    out = {}
+    for path in map(_json_key, patterns):
+        node = data
+        for part in path:
+            node = node.get(part) if isinstance(node, dict) else None
+        out[".".join(path)] = node
+    return json.dumps(out, sort_keys=True)
 
 
 def section_changed(rel: str, old: str, new: str, patterns: list[str]) -> bool:
@@ -209,6 +221,7 @@ def main() -> None:
     if not target:
         return
     root = kitlib.project_dir(hi)
+    kitlib.record_baseline(root, hi)  # in case SessionStart didn't run: the tree before this session's first edit
     text = json.dumps(ti)
     if "disableAllHooks" in text and str(target).replace("\\", "/").endswith(("settings.json", "settings.local.json")):
         kitlib.block("Blocked: turning hooks off (disableAllHooks) would switch off the test protections. "

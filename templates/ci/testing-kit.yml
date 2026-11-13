@@ -1,12 +1,12 @@
-# Testing kit CI for Python. Pin every action to a full commit SHA in real use
+# Testing kit CI ({{STACK}}). Pin every action to a full commit SHA in real use
 # (keep the tag as a comment); tags are shown here for readability.
-name: tests
+name: testing-kit
 on:
   pull_request:
     # labeled/unlabeled: adding `allow-test-changes` re-runs the gates
     types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
-    branches: [main]
+    branches: [{{BRANCHES}}]
 permissions:
   contents: read
 concurrency:
@@ -22,19 +22,21 @@ jobs:
         with: {fetch-depth: 0}
       {{CI_SETUP}}
       - name: Fast tier
-        run: {{FAST}}
+        run: |
+          {{FAST_YAML}}
       - name: Test report
+        # Reads the JUnit file named by junit_path in .claude/testing-kit.json, if the runner writes one.
         if: ${{ !cancelled() }}
-        run: python .claude/testing-kit/test_report.py .reports/junit.xml || true
+        run: python3 .claude/testing-kit/test_report.py || true
       - name: Diff coverage (changed lines)
-        # Runs only when the fast tier writes a coverage report (e.g. add --cov --cov-report=xml,
+        # Runs only when the fast tier writes a coverage report (e.g. pytest --cov --cov-report=xml,
         # or vitest/jest --coverage with the cobertura reporter).
-        if: github.event_name == 'pull_request' && hashFiles('coverage.xml', 'coverage/cobertura-coverage.xml') != ''
+        if: github.event_name == 'pull_request' && hashFiles('{{COVERAGE_XML}}') != ''
         env: {BASE_REF: "${{ github.base_ref }}"}
-        run: pipx run diff-cover coverage.xml --compare-branch="origin/$BASE_REF" --fail-under=90
+        run: pipx run diff-cover {{COVERAGE_XML}} --compare-branch="origin/$BASE_REF" --fail-under=90
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
-        with: {name: junit, path: .reports/}
+        with: {name: junit, path: "{{REPORT_DIR}}", if-no-files-found: ignore, include-hidden-files: true}
 
   test-guard:
     # Did this branch delete, skip, loosen or regenerate tests, or change test config?
@@ -55,7 +57,7 @@ jobs:
             git archive "origin/$BASE_REF" .claude/testing-kit | tar -x -C "$RUNNER_TEMP/kit"
             KIT="$RUNNER_TEMP/kit/.claude/testing-kit"
           fi
-          python "$KIT/test_diff_guard.py" --base "origin/$BASE_REF"
+          python3 "$KIT/test_diff_guard.py" --base "origin/$BASE_REF"
 
   base-tests:
     # The base branch's tests (and harness) must still pass against this branch's code.
@@ -66,7 +68,9 @@ jobs:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
       {{CI_SETUP}}
-      - env: {BASE_REF: "${{ github.base_ref }}"}
+      - env:
+          BASE_REF: ${{ github.base_ref }}
+          ALLOW_TEST_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'allow-test-changes') && '1' || '0' }}
         run: |
           # Run the gate from the base branch's copy when it has one, so a PR can't edit its own gate.
           KIT=.claude/testing-kit
@@ -75,7 +79,7 @@ jobs:
             git archive "origin/$BASE_REF" .claude/testing-kit | tar -x -C "$RUNNER_TEMP/kit"
             KIT="$RUNNER_TEMP/kit/.claude/testing-kit"
           fi
-          python "$KIT/base_tests.py" --base "origin/$BASE_REF"
+          python3 "$KIT/base_tests.py" --base "origin/$BASE_REF"
 
   all-green:
     # Make THIS the one required status check in the branch ruleset.
