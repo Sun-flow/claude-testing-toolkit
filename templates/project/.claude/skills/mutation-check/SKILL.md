@@ -1,17 +1,17 @@
 ---
 name: mutation-check
 description: Run diff-scoped mutation testing to check that the tests for the current change can actually fail. Use for medium/high-risk changes or when coverage looks good but the tests may be weak.
-argument-hint: "[base branch, default origin/main]"
+argument-hint: "[base branch, default {{BASE}}]"
 ---
-Base branch: $ARGUMENTS (if empty, use origin/main).
-Files changed against origin/main: !`git diff --name-only origin/main...HEAD`
+Base branch: $ARGUMENTS (if empty, use {{BASE}}).
+Files changed against {{BASE}}: !`git diff --name-only {{BASE}}...HEAD`
 
 Mutation testing changes the code in small ways ("mutants") and checks that some test fails. A surviving mutant in changed code means the tests don't pin that behaviour (guidelines TG-34).
 
 1. Use `commands.mutation` from `.claude/testing-kit.json` if set. Otherwise pick by stack and scope to the changed source files only:
    - Python: `mutmut run --paths-to-mutate <files>` (mutmut 3: set `paths_to_mutate` in `[tool.mutmut]`), then `mutmut results`. Or the `mutmut-mcp` server if installed.
    - JS/TS: `npx stryker run --incremental --mutate <files>`
-   - Rust: `cargo mutants --in-diff <(git diff origin/main...HEAD)`
+   - Rust: `cargo mutants --in-diff <(git diff {{BASE}}...HEAD)`
    - Java: PIT with `-DtargetClasses=<changed classes>` (or the Gradle/Maven `scmMutationCoverage` goal)
    - Go: `go-mutesting <packages>`
    Tell the user if the tool isn't installed and give the install command; don't install it without asking.

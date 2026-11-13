@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """CI/local check: did this branch weaken the test suite?  Standard library only.
 
-    python .claude/testing-kit/test_diff_guard.py [--base origin/main] [--json]
+    python .claude/testing-kit/test_diff_guard.py [--base BRANCH] [--json]
 
-Compares HEAD with the merge base and reports:
+Compares HEAD with the merge base (of BRANCH; default: the repo's default branch) and reports:
   BLOCK  deleted or renamed-away test files; test functions that disappeared;
          added skip/xfail/only markers; snapshot/golden files changed; harness
          files changed (runner/coverage config, conftest, CI, .claude/ kit);
          production code that checks whether it runs under a test
   WARN   removed assertion lines; added sleeps/retries; new test files with no
-         recognisable test; changed test files with no failure-path test
+         recognisable test; changed test files with no failure-path test;
+         changes to a file the test command goes through (`runner_files`)
 Exit 1 when there is any BLOCK finding, unless ALLOW_TEST_CHANGES=1 is set
 (e.g. from a PR label a human adds). Guidelines: TG-14..TG-18, TG-35.
 """
@@ -47,7 +48,7 @@ def git(root: Path, *args: str) -> str:
 
 def show(root: Path, rev: str, path: str) -> str:
     out = subprocess.run(["git", "show", f"{rev}:{path}"], cwd=root, capture_output=True, text=True,
-                         errors="replace")
+                         encoding="utf-8", errors="replace")
     return out.stdout if out.returncode == 0 else ""
 
 
@@ -87,6 +88,9 @@ def analyse(root: Path, base: str) -> dict:
             else:
                 block.append(f"harness file changed: {new_path} ({code})")
             continue
+        if kitlib.matches_any(new_path, cfg.get("runner_files") or []):
+            warn.append(f"test runner file changed: {new_path} (the test command goes through it; the "
+                        "base-tests gate runs with the base's copy)")
         sections = kitlib.harness_section_patterns(new_path, cfg)
         if sections and code[0] in "AMD":
             # an added file counts too: a new setup.cfg can carry a [tool:pytest] section
@@ -139,11 +143,12 @@ def analyse(root: Path, base: str) -> dict:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Did this branch weaken the test suite?")
-    ap.add_argument("--base", default="origin/main", help="branch or commit to compare with")
+    ap.add_argument("--base", help="branch or commit to compare with (default: the repo's default branch)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    base = a.base
+    kitlib.tolerant_output()
     root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
+    base = a.base or kitlib.default_base(root)
     r = analyse(root, base)
     if a.json:
         print(json.dumps(r, indent=2))
