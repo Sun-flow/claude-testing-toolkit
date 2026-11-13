@@ -101,4 +101,8 @@ python -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/python -m pytest -q tests
 ```
 
-Not yet tested on Windows or macOS, or live in GitHub Actions. Review rounds and their findings are in `../reviews/`.
+Not yet tested on Windows or macOS, or live in GitHub Actions.
+
+## Research
+
+`research/` holds the reports the guidelines cite as [R1]–[R6] and [R1b].

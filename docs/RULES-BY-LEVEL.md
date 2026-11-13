@@ -13,7 +13,7 @@
 
 This decides which layer you can rely on. From the Claude Code docs, checked 2026-11-12 [round1-MECHANICS MECH-1, MECH-4]:
 
-| | Local session (CLI, desktop, IDE) | Cloud session on one repo | **Cloud thread in a claude.ai project** (how the maintainer works) | `claude -p` in CI | `claude --bare -p` |
+| | Local session (CLI, desktop, IDE) | Cloud session on one repo | **Cloud thread in a claude.ai project**  | `claude -p` in CI | `claude --bare -p` |
 |---|---|---|---|---|---|
 | `CLAUDE.md` + unscoped `.claude/rules/*.md` | ✓ | ✓ | ✓ | ✓ | ✗ |
 | Rules with `paths:` | ✓ | ✓ | ✗ | ✓ | ✗ |
@@ -89,7 +89,7 @@ Installed by `python install.py --project <repo> [--profile minimal|standard|str
 | `/mutation-check` | Diff-scoped mutmut / Stryker / cargo-mutants / PIT / go-mutesting, survivors explained | Medium/high tier |
 | `/test-review` | The multi-agent review protocol over the branch's diff | Before a PR with test changes |
 
-If `claude-toolkit` already links a `run-tests` skill into the repo, the installer leaves the link alone and reports it. Merging the kit into the toolkit was a round-1 proposal (P2).
+If `claude-toolkit` already links a `run-tests` skill into the repo, the installer leaves the link alone and reports it.
 
 ### CI (`--ci`; templates for Python/uv and Node/npm)
 

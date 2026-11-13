@@ -5,15 +5,7 @@
 
 ## Where this comes from
 
-This project's memory was empty, so the pattern is taken from earlier repositories:
-
-| Source | What it contributed |
-|---|---|
-| `an earlier project's EDGE-CASE-FINDINGS.md` | An adversarial review whose expected results come from **the brief's intent, not the code**; a findings table `Id · Area · Cases · What broke · Severity · Settled`; fixes offered as **numbered proposals (P1–P12) that the maintainer approves**, then recorded in `docs/decisions.md` (Decision / Rationale / Alternatives / Status). |
-| `a memory bank` (log + decisions) | Each review is **its own dated file** (merge-proof: one file per entry, never a shared list). A review is "adopted with fixes", and open gaps become **numbered open questions**. |
-| `claude-toolkit` (`/research` skill, `test-integrity` rule) | Reviewers write **proposals and never auto-apply** them; tests are never changed to match code without asking. |
-
-Research adds three refinements: reviewers work in a **fresh context** and are not the author [R5 rule 12]; an LLM reviewer reading the diff was the most effective detector of test gaming [R5 §1]; and reviewers that chase every gap cause over-engineering, so findings carry a severity and a confidence [R5 F12].
+Adapted from earlier review practice: expected results come from the brief, not the code; findings go in a table; fixes are numbered proposals that the maintainer approves; reviewers never auto-apply them.
 
 ## Roles
 
