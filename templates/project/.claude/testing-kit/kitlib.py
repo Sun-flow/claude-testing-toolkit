@@ -55,7 +55,16 @@ ALLOW_MARKER = ".claude/allow-test-edits"
 ALLOW_MARKER_TTL_S = 2 * 60 * 60  # a forgotten marker stops counting after 2 hours
 
 
+# The project this copy of the kit is installed in: <project>/.claude/testing-kit/kitlib.py. resolve()
+# follows a symlink, so a parent folder that links to this kit still finds the project.
+KIT_PROJECT = Path(__file__).resolve().parents[2]
+
+
 def project_dir(hook_input: dict | None = None) -> Path:
+    # Prefer the project that holds this kit. Claude can start in a folder above it (a cloud session
+    # that clones its repositories into subfolders), and there CLAUDE_PROJECT_DIR names that folder.
+    if (KIT_PROJECT / ".claude" / "testing-kit.json").is_file():
+        return KIT_PROJECT
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         return Path(env)

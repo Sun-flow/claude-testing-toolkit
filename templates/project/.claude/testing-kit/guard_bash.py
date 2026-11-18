@@ -152,7 +152,8 @@ def main() -> None:
     if "allow-test-edits" in command:
         kitlib.block("Blocked: only the user may create or change the test-edit allow marker.")
 
-    bad = violations(command, root, cfg)
+    # relative paths start from the shell's directory, which can differ from the project's
+    bad = violations(command, root, cfg, Path(hi["cwd"]) if hi.get("cwd") else None)
     if bad:
         kitlib.guard("this command would change protected tests or test harness (" + "; ".join(bad)
                      + "). Existing tests are the specification (TG-14/TG-15). Approve only if the user "

@@ -144,7 +144,7 @@ the kit treats as a change to the suite itself:
 
 | Claude is about to | Why it asks |
 |---|---|
-| Change or remove lines in an existing test, or add `skip`, `xfail` or `.only` | A failing test is more often right than wrong. New test files and pure additions never ask |
+| Change or remove a line of a test the base branch has, or add `skip`, `xfail` or `.only` | A failing test is more often right than wrong. New test files, pure additions and reworking tests that are new on the current branch never ask |
 | Edit runner or coverage config, `conftest.py`, CI workflows, or the kit's own files and settings under `.claude/` | These decide what the tests check, and what checks the tests |
 | Regenerate a snapshot or golden file | Each changed hunk needs a human's eyes |
 | Run a shell command that writes, moves or deletes one of the above | The same change by another route |
@@ -191,6 +191,7 @@ workflow show the same command (`--check` tells you when they don't).
 | `junit_path` | Where `commands.fast` writes JUnit XML. `""` means it writes none (see [Stacks](#stacks)) |
 | `extra_test_globs` | Patterns for test files the kit does not recognise by itself, for example `["checks/**"]` |
 | `not_test_globs` | Production files that only look like tests, for example `["src/**/test_runner.py"]` |
+| `base_branch` | The branch whose tests are the specification, for example `"origin/main"`. The edit hook protects the tests that branch had where the current branch left it; a test that is new on the current branch is free to rework. Without it the hook uses origin's default branch as the clone recorded it, and when it can tell neither it protects every test file on disk |
 | `extra_harness_globs` | More files that count as test harness (asked about locally, blocked in CI) |
 | `runner_files` | Files the test command goes through, such as a Makefile or `scripts/test.sh`. The base-tests gate takes them from the base branch, so a pull request cannot redefine what `make test` does. The installer fills this in from your commands |
 | `harness_sections` | Sections of shared files that are test config, for example `scripts.test` in `package.json` |
