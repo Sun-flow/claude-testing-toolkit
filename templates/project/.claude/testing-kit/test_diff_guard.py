@@ -7,6 +7,7 @@ Compares HEAD with the merge base (of BRANCH; default: the repo's default branch
   BLOCK  deleted or renamed-away test files; test functions that disappeared;
          added skip/xfail/only markers; snapshot/golden files changed; harness
          files changed (runner/coverage config, conftest, CI, .claude/ kit);
+         a draft of a test (`x.test.draft.ts`, `x.draft.test.ts`) left in the branch;
          production code that checks whether it runs under a test
   WARN   removed assertion lines; added sleeps/retries; new test files with no
          recognisable test; changed test files with no failure-path test;
@@ -62,6 +63,18 @@ def diff_lines(root: Path, base: str, path: str, old_path: str | None = None) ->
     return added, removed
 
 
+def is_test_draft(path: str, cfg: dict) -> bool:
+    """A file with `.draft.` in its name that is a test with or without that part of the name, whatever
+    `not_test_globs` says: tests/x.test.draft.ts, tests/x.draft.test.ts."""
+    name = Path(path).name
+    if ".draft." not in name or kitlib.matches_any(path, ["**/fixtures/**", "**/testdata/**",
+                                                         "**/__snapshots__/**", "**/snapshots/**"]):
+        return False  # test data may be called a draft of something else
+    globs = cfg["test_globs"] + (cfg.get("extra_test_globs") or [])
+    plain = (Path(path).parent / name.replace(".draft.", ".", 1)).as_posix()
+    return kitlib.matches_any(path, globs) or kitlib.matches_any(plain, globs)
+
+
 def analyse(root: Path, base: str) -> dict:
     merge_base = git(root, "merge-base", base, "HEAD").strip()
     cfg = kitlib.load_config_at(root, merge_base)  # the base's config: the branch can't redefine what a test is
@@ -87,6 +100,12 @@ def analyse(root: Path, base: str) -> dict:
                 warn.append(f"harness file added: {new_path} (no tests on the base yet, so nothing to weaken)")
             else:
                 block.append(f"harness file changed: {new_path} ({code})")
+            continue
+        if code[0] in "AMR" and is_test_draft(new_path, cfg):
+            # A draft is a working copy of a test, kept out of the guards while it is reworked. Merged, it
+            # would be a test nothing protects (and one the suite may or may not run).
+            block.append(f"draft of a test committed: {new_path} (put it in place of the test it drafts, or "
+                         "delete it, before merging)")
             continue
         if kitlib.matches_any(new_path, cfg.get("runner_files") or []):
             warn.append(f"test runner file changed: {new_path} (the test command goes through it; the "

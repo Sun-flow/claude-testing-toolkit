@@ -7,6 +7,7 @@
   },
   "junit_path": "",
   "runner_files": [],
+  "base_branch": "",
   "extra_test_globs": [],
   "not_test_globs": [],
   "src_dirs": ["src"],

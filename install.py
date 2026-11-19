@@ -761,7 +761,11 @@ def install_project(root: Path, a: argparse.Namespace) -> Plan:
         if profile == "minimal":
             cfg["stop_hook"]["enabled"] = False
         protect_runner(cfg, cmds, root)
-        plan.note("create", cfg_path)
+        # The branch whose tests are the specification. "" when no usual branch is found: the hooks then
+        # use origin's default branch if the clone records one, and protect every test on disk if not.
+        cfg["base_branch"] = base
+        plan.note("create", cfg_path, f"base_branch {base}: check it is the branch pull requests merge into"
+                  if base else "base_branch not set: no default branch found (see the guide)")
         if not plan.dry:
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
             _write(cfg_path, dump_like(cfg))
@@ -1013,6 +1017,22 @@ def run_fast_tier(root: Path, cfg: dict) -> tuple[list, list]:
     return problems, notes
 
 
+def base_branch_notes(root: Path, cfg: dict) -> list:
+    """Which branch's tests the hooks protect, or a warning that they can't tell."""
+    named = str(cfg.get("base_branch") or "").strip()
+    ref = kitlib().base_ref(root, cfg)
+    fallback = ("until then the hooks protect every test file on disk, so reworking a test that is new on "
+                "your branch asks each time")
+    if not ref:
+        return ['WARNING base branch unknown: "base_branch" is not set in .claude/testing-kit.json and this '
+                "clone records no default branch for origin. Set it (for example \"origin/main\"), or run "
+                f"`git remote set-head origin --auto`; {fallback}"]
+    if git_out(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is None:
+        return [f"WARNING base branch {ref} " + ('(from "base_branch")' if named else "(origin's default)")
+                + f" is not in this clone. Fetch it or correct \"base_branch\"; {fallback}"]
+    return [f"base branch: {ref}" + ("" if named else " (origin's default; set \"base_branch\" to pin it)")]
+
+
 def check(root: Path, run: bool = False) -> int:
     problems, notes = [], []
     manifest = load_manifest(root)
@@ -1096,6 +1116,7 @@ def check(root: Path, run: bool = False) -> int:
                 problems += more_problems
                 notes += more_notes
         notes.append(tests_line(root))
+        notes += base_branch_notes(root, cfg)
     except (OSError, ValueError):
         problems.append("missing or invalid .claude/testing-kit.json")
     print(f"Testing kit check for {root}")

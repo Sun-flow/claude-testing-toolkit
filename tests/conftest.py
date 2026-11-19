@@ -53,6 +53,9 @@ def repo(tmp_path: Path) -> Path:
     cfg = json.loads(cfg_path.read_text())
     cfg["commands"]["fast"] = f'"{sys.executable}" -m pytest -q -p no:cacheprovider --junitxml=.reports/junit.xml'
     cfg["commands"]["setup"] = ""
+    # No base branch named, and no origin: the hooks protect every test on disk. Tests of the base-branch
+    # rule name one themselves.
+    cfg["base_branch"] = ""
     cfg_path.write_text(json.dumps(cfg, indent=2))
     git(r, "add", "-A")
     git(r, "commit", "-qm", "install kit")

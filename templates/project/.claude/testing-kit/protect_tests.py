@@ -6,6 +6,13 @@ Allowed:
   * adding to an existing test file, when every existing line is kept in order,
     no skip/xfail/only markers or no-cover pragmas are added, and no existing
     test name is defined a second time (which would shadow the original)
+  * reworking tests that are new on the current branch: a test file the base
+    branch doesn't have, or an edit to a file it does have that still counts as
+    an addition to the base branch's copy. Tests are the specification once
+    they are on the base branch (config "base_branch", else origin's default
+    branch); until then they are their author's work in progress. The CI gates
+    compare with the same merge base. When the base can't be worked out, every
+    test file on disk is protected.
 Blocked (exit 2, reason shown to Claude):
   * changing or removing existing lines of a test file
   * hand-editing snapshot/golden files
@@ -261,8 +268,11 @@ def main() -> None:
 
     if not kitlib.is_test_path(rel, cfg):
         return  # production code
+    base_known, base = kitlib.base_version(root, rel, cfg)
+    if base_known and base is None:
+        return  # not on the base branch: a new test file, or one this branch is still writing
     head = None if exists else kitlib.head_content(root, rel)
-    if not exists and head is None:
+    if not exists and head is None and base is None:
         return  # a brand-new test file
 
     if kitlib.matches_any(rel, SNAPSHOT_GLOBS):
@@ -270,7 +280,7 @@ def main() -> None:
                      f"pass rewrites the expected output (TG-17). {HOW_TO_PROCEED}", cfg)
         return
 
-    current = _read(path) if exists else head
+    current = _read(path) if exists else (head if head is not None else base)
     new = proposed_content(tool, ti, current)
     if current is None or new is None:
         if tool == "Edit" and current is not None:
@@ -279,6 +289,8 @@ def main() -> None:
                      f"addition (TG-14). {HOW_TO_PROCEED}", cfg)
         return
     problems = addition_problems(current, new)
+    if problems and base is not None and base != current and not addition_problems(base, new):
+        return  # everything the base branch has is kept: only this branch's own additions are reworked
     if problems:
         kitlib.guard(f"{rel} is an existing test file and this edit is not a pure addition of new tests: "
                      f"{'; '.join(problems)}. Existing tests are the specification (TG-14). "

@@ -16,6 +16,7 @@ Always loaded. The long form, with reasons and sources, is `docs/testing/GUIDELI
 
 **Never game the suite** ★
 - Don't modify, delete, skip, xfail, `.only` or loosen an existing test, and don't edit runner/coverage/CI config, to get green. If a test looks wrong: stop and tell the user the test, what it expects, what the code does, your evidence and the change you propose. The user decides (TG-14, TG-15).
+- "Existing" means the base branch has it. A test you wrote on this branch is yours to rework until it merges, but its expected values still come from the spec, never from what the code does (TG-05).
 - Don't regenerate snapshots/golden files to make a test pass (TG-17). Don't add retries, sleeps, longer timeouts or skips as a fix (TG-18).
 - Production code never checks whether it runs under a test (TG-16).
 - If you're stuck after a few honest attempts, stop and write a report starting with `BLOCKED:` (TG-19). That is always an acceptable outcome; gaming the tests never is.
