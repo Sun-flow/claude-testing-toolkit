@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.5.0 (2026-11-19): protect the base branch's tests, not work in progress
+
+Found by running several agent sessions in parallel in a real project: each was asked to approve every
+changed line of test files it had written minutes before, and nobody could usefully judge those prompts.
+
+**The base-branch rule**
+- A test is the specification once it is on the base branch. The edit hook now reads each test file as
+  the base branch had it where the current branch left it. A test file the base branch doesn't have,
+  and tests the branch added to a file it does have, can be reworked without a prompt. Changing or
+  removing a base line, adding `skip`/`only`, or defining a base test a second time still asks. A base
+  test file deleted on the branch and written again now asks (it did not before).
+- The shell guards follow the same rule: `rm`, `mv` or `git mv` on a test that is new on the branch no
+  longer asks, and the audit after a shell command no longer reports it. Harness files (runner config,
+  `conftest.py`, CI, the kit) are protected as before, new or not.
+- New config key `base_branch` (for example `"origin/main"`). The installer fills it in on a new
+  install, preferring origin's branch. Left empty, the hooks use origin's default branch as the clone
+  recorded it. When neither is there the hooks protect every test file on disk, as 0.4 did. Existing
+  installs keep their config: add the key yourself, or rely on origin's default.
+- `--check` reports the base branch in use, and warns when it can't be worked out or isn't in the clone.
+- The CI gates run by hand without `--base` use `base_branch` first, which helps in a clone that doesn't
+  record origin's default branch.
+- Because the base branch now decides which tests are protected, git commands that move it ask first:
+  `git branch -f/-D/-m`, `git checkout -B`, `git update-ref`, `git symbolic-ref`,
+  `git remote set-head`, a fetch or push straight into the base branch, and a `git reset` to a commit
+  from before the branch left the base (which would keep newer base tests on disk as if they were new).
+- On a filesystem that ignores case (macOS, Windows), a path spelled with different capitals still
+  finds the base branch's copy.
+
+What this gives up: Claude can write a test, see its code fail it, and loosen its own new test without
+a prompt. CI never caught that either. The defences are the ones for any new test: red before green
+(TG-04), expected values from the spec (TG-05), the `test-reviewer` agent and the mutation check.
+
+**Sessions that start above the project**
+- The hooks find the project from the kit's own location, so they work when Claude starts in a folder
+  above the repository (`CLAUDE_PROJECT_DIR` names that folder then).
+- The shell guard resolves relative paths from the shell's directory. Before, `rm ../tests/test_x.py`
+  run from a subfolder was not noticed.
+
+**Also**
+- The CI gate blocks a committed draft of a test (`x.test.draft.ts`, `x.draft.test.ts`,
+  `test_x.draft.py`), so a working copy kept out of the guards can't be merged.
+- Copy commands (`cp`, `rsync`, `install`, `ln`, `Copy-Item`) are checked by their destination only.
+  Copying a protected test to a new file no longer asks.
+
+92 new tests.
+
 ## 0.4.1 (2026-11-13): documentation is not production code
 
 Found by the first install into a real project: the CI gate reported the installed guidelines as production code that checks for a test environment.

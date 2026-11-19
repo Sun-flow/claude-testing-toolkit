@@ -49,6 +49,9 @@ DEFAULT_CONFIG = {
     # "deny": always refuse; the user edits the file or uses the allow marker.
     "enforcement": "ask",
     "default_tier": "medium",
+    # The branch whose tests are the specification, for example "origin/main". "" means origin's default
+    # branch as the clone recorded it (refs/remotes/origin/HEAD).
+    "base_branch": "",
 }
 
 ALLOW_MARKER = ".claude/allow-test-edits"
@@ -139,13 +142,102 @@ def default_base(root: Path, fallback: str = "origin/main") -> str:
             return None
         return out.stdout.strip() if out.returncode == 0 else None
 
+    def exists(name: str) -> bool:
+        return bool(git("rev-parse", "--verify", "--quiet", name + "^{commit}"))
+
+    named = str(load_config(root).get("base_branch") or "").strip()
+    if named and exists(named):
+        return named
     head = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if head:
         return head
     for name in ("origin/main", "origin/master", "main", "master"):
-        if git("rev-parse", "--verify", "--quiet", name + "^{commit}"):
+        if exists(name):
             return name
     return fallback
+
+
+# ---------------------------------------------------------------- the base branch's tests
+# A test is the specification once it is on the base branch. Until then it is its author's work in
+# progress. The hooks compare with the commit where the current branch left the base branch, as the CI
+# gates do.
+
+def _git_bytes(root: Path, *args: str) -> bytes | None:
+    import subprocess
+    try:
+        out = subprocess.run(["git", *args], cwd=root, capture_output=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
+def base_ref(root: Path, cfg: dict) -> str:
+    """The base branch: config "base_branch", else origin's default branch as this clone recorded it.
+    "" when neither is there. No guessing at main or master: a wrong base would leave tests unprotected."""
+    ref = str(cfg.get("base_branch") or "").strip()
+    if not ref:
+        head = _git_bytes(root, "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD")
+        ref = head.decode("utf-8", "replace").strip() if head else ""
+    return ref
+
+
+def base_commit(root: Path, cfg: dict) -> str:
+    """The commit where the current branch left the base branch, or "" when that can't be worked out."""
+    ref = base_ref(root, cfg)
+    if not ref or ref.startswith("-"):
+        return ""
+    out = _git_bytes(root, "merge-base", "HEAD", ref)
+    return out.decode("ascii", "replace").strip() if out else ""
+
+
+def base_files(root: Path, cfg: dict, ignore_case: bool | None = None) -> dict | None:
+    """The files the base branch had at that commit, as {path to compare with: path as git has it}, paths
+    relative to `root`. None when the base can't be worked out: callers then protect every test on disk.
+    On a filesystem that ignores case the keys are lower case, so Tests/X.py finds tests/x.py."""
+    commit = base_commit(root, cfg)
+    if not commit:
+        return None
+    out = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", commit)
+    if out is None:
+        return None
+    fold = CASE_INSENSITIVE_FS if ignore_case is None else ignore_case
+    names = [n for n in out.decode("utf-8", "surrogateescape").split("\0") if n]
+    return {(n.lower() if fold else n): n for n in names}
+
+
+def base_path(files: dict | None, rel: str, ignore_case: bool | None = None) -> str | None:
+    """`rel` as the base branch names it, or None when the base branch doesn't have it."""
+    if files is None:
+        return None
+    fold = CASE_INSENSITIVE_FS if ignore_case is None else ignore_case
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return files.get(rel.lower() if fold else rel)
+
+
+def base_version(root: Path, rel: str, cfg: dict) -> tuple[bool, str | None]:
+    """(known, text): `rel` as the base branch has it, at the commit where this branch left it.
+    known is False when that can't be worked out (no base branch named or recorded, no common commit,
+    git missing); the caller then protects the file as it is on disk. text is None when the base
+    branch doesn't have the file: it is new on this branch."""
+    files = base_files(root, cfg)
+    if files is None:
+        return False, None
+    name = base_path(files, rel)
+    if name is None:
+        return True, None
+    shown = _git_bytes(root, "show", f"{base_commit(root, cfg)}:./{name}")
+    if shown is None:
+        return False, None
+    return True, shown.decode("utf-8", "replace")
+
+
+def new_on_branch(files: dict | None, rel: str, cfg: dict) -> bool:
+    """Is `rel` a test the base branch doesn't have? Such a test is work in progress, not yet the
+    specification. Harness files and everything else are never "new" here: they stay protected."""
+    if files is None or not is_test_path(rel, cfg) or is_harness_path(rel, cfg):
+        return False
+    return base_path(files, rel) is None
 
 
 # macOS and Windows filesystems are normally case-insensitive: TESTS/Test_x.py is the same file there.

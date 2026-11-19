@@ -32,7 +32,6 @@ import ast
 import json
 from collections import Counter
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -58,41 +57,6 @@ def _read(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-
-
-def _git(root: Path, *args: str) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(["git", *args], cwd=root, capture_output=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def base_version(root: Path, rel: str, cfg: dict) -> tuple[bool, str | None]:
-    """(known, text): `rel` as the base branch has it, at the commit where this branch left it.
-    known is False when that can't be worked out (no base branch named or recorded, no common commit,
-    git missing); the caller then protects the file as it is on disk. text is None when the base
-    branch doesn't have the file: it is new on this branch."""
-    ref = str(cfg.get("base_branch") or "").strip()
-    if not ref:
-        # origin's default branch as this clone recorded it. No guessing at main or master: a wrong
-        # base would leave tests unprotected.
-        head = _git(root, "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD")
-        ref = head.stdout.decode("utf-8", "replace").strip() if head and head.returncode == 0 else ""
-    if not ref:
-        return False, None
-    merge_base = _git(root, "merge-base", "HEAD", ref)
-    commit = merge_base.stdout.decode("ascii", "replace").strip() if merge_base and merge_base.returncode == 0 else ""
-    if not commit:
-        return False, None
-    listed = _git(root, "ls-tree", "-z", "--name-only", commit, "--", rel)
-    if listed is None or listed.returncode != 0:
-        return False, None
-    if not listed.stdout.strip(b"\0"):
-        return True, None
-    shown = _git(root, "show", f"{commit}:./{rel}")
-    if shown is None or shown.returncode != 0:
-        return False, None
-    return True, shown.stdout.decode("utf-8", "replace")
 
 
 def proposed_content(tool: str, ti: dict, current: str | None) -> str | None:
@@ -304,7 +268,7 @@ def main() -> None:
 
     if not kitlib.is_test_path(rel, cfg):
         return  # production code
-    base_known, base = base_version(root, rel, cfg)
+    base_known, base = kitlib.base_version(root, rel, cfg)
     if base_known and base is None:
         return  # not on the base branch: a new test file, or one this branch is still writing
     head = None if exists else kitlib.head_content(root, rel)

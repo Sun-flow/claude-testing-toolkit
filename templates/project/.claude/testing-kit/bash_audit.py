@@ -3,7 +3,8 @@
 
 Parsing commands can't catch every route (`python script.py`, `make`, a
 generated script ...). So before each Bash call this hook records a hash of
-every test and harness file git knows about (tracked, or untracked and not ignored), and after the call it compares. Any
+every test and harness file git knows about (tracked, or untracked and not ignored), and after the call it compares.
+Tests the base branch doesn't have are left out: they are work in progress, as in protect_tests.py. Any
 protected file that the command changed or deleted is reported back to Claude
 (exit 2 after the fact), with the fix: restore it with `git checkout -- <file>`
 or ask the user.
@@ -34,8 +35,10 @@ def protected_files(root: Path, cfg: dict) -> list[str]:
     if out.returncode != 0:
         return []
     files = [f for f in out.stdout.decode("utf-8", "replace").split("\0") if f]
-    return [f for f in files if kitlib.is_test_path(f, cfg) or kitlib.is_harness_path(f, cfg)
-            or kitlib.harness_section_patterns(f, cfg)]
+    base = kitlib.base_files(root, cfg)  # None when the base branch can't be worked out: everything counts
+    return [f for f in files if (kitlib.is_test_path(f, cfg) or kitlib.is_harness_path(f, cfg)
+                                 or kitlib.harness_section_patterns(f, cfg))
+            and not kitlib.new_on_branch(base, f, cfg)]
 
 
 def digest(path: Path) -> str:
